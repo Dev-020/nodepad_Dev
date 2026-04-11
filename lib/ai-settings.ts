@@ -12,7 +12,7 @@ export interface AIModel {
   groundingModelId?: string
 }
 
-export type AIProvider = "openrouter" | "openai" | "zai"
+export type AIProvider = "openrouter" | "openai" | "zai" | "ollama"
 
 export interface AIProviderPreset {
   id: AIProvider
@@ -43,6 +43,13 @@ export const AI_PROVIDER_PRESETS: AIProviderPreset[] = [
     baseUrl: "https://api.z.ai/api/paas/v4",
     keyUrl: "https://z.ai/manage-apikey/apikey-list",
     keyPlaceholder: "Your Z.ai API key",
+  },
+  {
+    id: "ollama",
+    label: "Ollama",
+    baseUrl: "https://ollama.com",
+    keyUrl: "https://ollama.com/cloud",
+    keyPlaceholder: "Your Ollama Cloud API Key",
   },
 ]
 
@@ -177,6 +184,7 @@ export const ZAI_MODELS: AIModel[] = [
 export function getModelsForProvider(provider: AIProvider): AIModel[] {
   if (provider === "openai") return OPENAI_MODELS
   if (provider === "zai")    return ZAI_MODELS
+  if (provider === "ollama") return [] // Loaded dynamically from proxy
   return AI_MODELS // openrouter + safe fallback for any stale localStorage value
 }
 
@@ -191,6 +199,8 @@ export interface AISettings {
   customBaseUrl: string
   /** Per-provider key store so switching back to a provider restores its key */
   providerKeys?: Partial<Record<AIProvider, string>>
+  /** Persisted list of discovered Ollama models */
+  ollamaModels?: AIModel[]
 }
 
 const STORAGE_KEY = "nodepad-ai-settings"
@@ -219,18 +229,21 @@ export interface AIConfig {
 export function loadAIConfig(): AIConfig | null {
   const s = loadSettings()
   if (!s.apiKey) return null
-  const models = getModelsForProvider(s.provider)
+  
+  // Use the persisted Ollama models if they exist, otherwise the static provider list
+  const models = s.provider === "ollama" ? (s.ollamaModels ?? []) : getModelsForProvider(s.provider)
   const model = models.find(m => m.id === s.modelId)
+  
   // Use the matched model's id if found; otherwise fall back to the first model
-  // for this provider.  This handles the case where localStorage still holds an
-  // OpenRouter-prefixed id (e.g. "openai/gpt-4o") after switching to OpenAI —
-  // that string won't match any entry in OPENAI_MODELS so we fall back to "gpt-4o".
+  // for this provider.
   const modelId = model?.id ?? models[0]?.id ?? s.modelId ?? DEFAULT_MODEL_ID
-  // Z.ai does not support grounding; only openrouter and openai do
+  
+  // Only allow grounding if the provider supports it AND the specific model supports it
   const supportsGrounding =
-    (s.provider === "openrouter" || s.provider === "openai") &&
+    (s.provider === "openrouter" || s.provider === "openai" || s.provider === "ollama") &&
     s.webGrounding &&
     (model?.supportsGrounding ?? false)
+    
   return { apiKey: s.apiKey, modelId, supportsGrounding, provider: s.provider, customBaseUrl: s.customBaseUrl }
 }
 
@@ -241,7 +254,9 @@ export function getBaseUrl(config: AIConfig): string {
 export function getProviderHeaders(config: AIConfig): Record<string, string> {
   const base: Record<string, string> = {
     "Content-Type": "application/json",
-    "Authorization": `Bearer ${config.apiKey}`,
+  }
+  if (config.apiKey) {
+    base["Authorization"] = `Bearer ${config.apiKey}`
   }
   if (config.provider === "openrouter") {
     base["HTTP-Referer"] = "https://nodepad.space"

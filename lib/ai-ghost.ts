@@ -56,15 +56,36 @@ Return ONLY valid JSON:
   const MAX_GHOST_OUTPUT_TOKENS = 220
 
   const baseUrl = getBaseUrl(config)
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  const isOllama = config.provider === "ollama"
+  const targetUrl = isOllama ? `${baseUrl}/api/chat` : `${baseUrl}/chat/completions`
+
+  const payload = {
+    model,
+    ...(isOllama
+      ? {
+          messages: [{ role: "user", content: prompt }],
+          stream: false,
+          options: {
+            temperature: 0.7,
+          },
+        }
+      : {
+          max_tokens: MAX_GHOST_OUTPUT_TOKENS,
+          messages: [{ role: "user", content: prompt }],
+          response_format: { type: "json_object" },
+          temperature: 0.7,
+        }),
+  }
+
+  // Use the server-side proxy route to bypass browser CORS/CSP restrictions.
+  const response = await fetch("/api/ai", {
     method: "POST",
-    headers: getProviderHeaders(config),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model,
-      max_tokens: MAX_GHOST_OUTPUT_TOKENS,
-      messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" },
-      temperature: 0.7,
+      url: targetUrl,
+      method: "POST",
+      headers: getProviderHeaders(config),
+      body: payload,
     }),
   })
 
@@ -72,7 +93,7 @@ Return ONLY valid JSON:
     throw new Error(await parseProviderError(response))
   }
 
-  let data: Record<string, unknown>
+  let data: any
   try {
     data = await response.json()
   } catch {
@@ -80,7 +101,11 @@ Return ONLY valid JSON:
       `AI ghost error (${config.provider}): response was not valid JSON. The provider may have timed out or returned a truncated response.`
     )
   }
-  const rawContent = (data.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content
+
+  const rawContent = isOllama
+    ? data.message?.content
+    : (data.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content
+
   if (!rawContent) throw new Error("No content in AI response")
 
   // Defensive parse

@@ -73,6 +73,10 @@ export function ProjectSidebar({
   const [showKey, setShowKey] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [providerOpen, setProviderOpen] = useState(false)
+  const [isCustomModel, setIsCustomModel] = useState(false)
+  const [ollamaModels, setOllamaModels] = useState<any[]>([])
+  const [isLoadingModels, setIsLoadingModels] = useState(false)
+  const [hasEmbeddingGemma, setHasEmbeddingGemma] = useState(true) // Default to true until checked
   // local draft for settings (only save on "Save")
   const [draft, setDraft] = useState<AISettings>(aiSettings)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -84,10 +88,38 @@ export function ProjectSidebar({
     }
   }, [editingId])
 
+  // Fetch Ollama models when selected
+  useEffect(() => {
+    if (draft.provider === "ollama") {
+      setIsLoadingModels(true)
+      fetch("/api/ai")
+        .then(res => res.json())
+        .then(data => {
+          if (data.models) {
+            setOllamaModels(data.models)
+            // Persist to AISettings so loadAIConfig can access them
+            onUpdateAISettings({ ollamaModels: data.models })
+          }
+          if (data.hasOwnProperty("hasEmbeddingGemma")) setHasEmbeddingGemma(data.hasEmbeddingGemma)
+        })
+        .catch(err => console.error("Failed to fetch Ollama models:", err))
+        .finally(() => setIsLoadingModels(false))
+    }
+  }, [draft.provider])
+
   // Sync draft when panel opens
   useEffect(() => {
-    if (showSettings) setDraft(aiSettings)
-  }, [showSettings])
+    if (showSettings) {
+      setDraft(aiSettings)
+      // If the current model isn't in the predefined list, default to custom mode
+      const currentModels = aiSettings.provider === "ollama" ? ollamaModels : getModelsForProvider(aiSettings.provider)
+      if (currentModels.length > 0 && !currentModels.find(m => m.id === aiSettings.modelId)) {
+        setIsCustomModel(true)
+      } else {
+        setIsCustomModel(false)
+      }
+    }
+  }, [showSettings, aiSettings, ollamaModels])
 
   // Jump straight to settings when requested externally
   useEffect(() => {
@@ -130,7 +162,7 @@ export function ProjectSidebar({
   }
 
   const currentPreset = getPreset(draft.provider)
-  const models = getModelsForProvider(draft.provider)
+  const models = draft.provider === "ollama" ? ollamaModels : getModelsForProvider(draft.provider)
   const selectedModel = models.find(m => m.id === draft.modelId) || models[0] || undefined
 
   return (
@@ -332,6 +364,7 @@ export function ProjectSidebar({
                                   apiKey: d.providerKeys?.[preset.id] ?? "",
                                 }))
                                 setProviderOpen(false)
+                                setIsCustomModel(false)
                               }}
                               className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left hover:bg-white/5 transition-colors"
                             >
@@ -386,17 +419,34 @@ export function ProjectSidebar({
                   <label className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
                     Model
                   </label>
-                  {models.length === 0 ? (
+                  {isLoadingModels ? (
+                    <div className="flex items-center justify-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2">
+                      <div className="h-3 w-3 animate-spin rounded-full border border-primary border-t-transparent" />
+                      <span className="font-mono text-[10px] text-muted-foreground">Discovering models...</span>
+                    </div>
+                  ) : models.length === 0 || isCustomModel ? (
                     <div className="flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2 focus-within:border-primary/50 transition-colors">
                       <input
                         type="text"
                         value={draft.modelId}
                         onChange={e => setDraft(d => ({ ...d, modelId: e.target.value }))}
-                        placeholder="e.g. gpt-4o, claude-3-opus-20240229"
+                        placeholder={draft.provider === "ollama" ? "e.g. llama3, minimax-m2.7:cloud" : "e.g. gpt-4o, minimax, kimi"}
                         className="flex-1 bg-transparent font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/40"
                         autoComplete="off"
                         spellCheck={false}
                       />
+                      {models.length > 0 && (
+                        <button
+                          onClick={() => {
+                            setIsCustomModel(false)
+                            setDraft(d => ({ ...d, modelId: models[0].id }))
+                          }}
+                          className="text-primary hover:text-primary/80 transition-colors px-1"
+                          title="Back to list"
+                        >
+                          <ArrowLeft className="h-3 w-3" />
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="relative">
@@ -405,7 +455,9 @@ export function ProjectSidebar({
                         className="flex w-full items-center justify-between rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2 text-left hover:bg-white/[0.07] focus:outline-none transition-colors"
                       >
                         <div>
-                          <div className="font-mono text-[11px] font-bold text-foreground">{selectedModel?.label ?? draft.modelId}</div>
+                          <div className="font-mono text-[11px] font-bold text-foreground">
+                            {selectedModel?.label ?? draft.modelId}
+                          </div>
                           <div className="font-mono text-[9px] text-muted-foreground mt-0.5">{selectedModel?.description ?? "Custom model ID"}</div>
                         </div>
                         <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform ${modelOpen ? "rotate-180" : ""}`} />
@@ -419,27 +471,46 @@ export function ProjectSidebar({
                             transition={{ duration: 0.1 }}
                             className="absolute top-full left-0 right-0 z-20 mt-1 overflow-hidden rounded-md border border-white/10 bg-[#0d0d10] shadow-xl"
                           >
-                            {models.map(model => (
+                            <div className="max-h-[200px] overflow-y-auto custom-scrollbar">
+                              {models.map(model => (
+                                <button
+                                  key={model.id}
+                                  onClick={() => {
+                                    setDraft(d => ({ ...d, modelId: model.id, webGrounding: model.supportsGrounding ? d.webGrounding : false }))
+                                    setModelOpen(false)
+                                  }}
+                                  className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left hover:bg-white/5 transition-colors"
+                                >
+                                  <div className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
+                                    draft.modelId === model.id ? "border-primary bg-primary/20" : "border-white/10"
+                                  }`}>
+                                    {draft.modelId === model.id && <Check className="h-2.5 w-2.5 text-primary" />}
+                                  </div>
+                                  <div>
+                                    <div className="font-mono text-[10px] font-bold text-foreground">
+                                      {model.label}
+                                    </div>
+                                    <div className="font-mono text-[9px] text-muted-foreground">{model.description}</div>
+                                  </div>
+                                  {model.supportsGrounding && (draft.provider === "openrouter" || draft.provider === "openai" || draft.provider === "ollama") && <Globe className="ml-auto h-3 w-3 shrink-0 text-primary/50" />}
+                                </button>
+                              ))}
                               <button
-                                key={model.id}
                                 onClick={() => {
-                                  setDraft(d => ({ ...d, modelId: model.id, webGrounding: model.supportsGrounding ? d.webGrounding : false }))
+                                  setIsCustomModel(true)
                                   setModelOpen(false)
                                 }}
-                                className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left hover:bg-white/5 transition-colors"
+                                className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left hover:bg-white/5 transition-colors border-t border-white/5"
                               >
-                                <div className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
-                                  draft.modelId === model.id ? "border-primary bg-primary/20" : "border-white/10"
-                                }`}>
-                                  {draft.modelId === model.id && <Check className="h-2.5 w-2.5 text-primary" />}
+                                <div className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-dashed border-white/20">
+                                  <Plus className="h-2.5 w-2.5 text-muted-foreground" />
                                 </div>
                                 <div>
-                                  <div className="font-mono text-[10px] font-bold text-foreground">{model.label}</div>
-                                  <div className="font-mono text-[9px] text-muted-foreground">{model.description}</div>
+                                  <div className="font-mono text-[10px] font-bold text-foreground">Custom Model ID...</div>
+                                  <div className="font-mono text-[9px] text-muted-foreground">Type any model name manually</div>
                                 </div>
-                                {model.supportsGrounding && (draft.provider === "openrouter" || draft.provider === "openai") && <Globe className="ml-auto h-3 w-3 shrink-0 text-primary/50" />}
                               </button>
-                            ))}
+                            </div>
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -447,8 +518,8 @@ export function ProjectSidebar({
                   )}
                 </div>
 
-                {/* Web Grounding (OpenRouter + OpenAI) */}
-                {(draft.provider === "openrouter" || draft.provider === "openai") && selectedModel && (
+                {/* Web Grounding (OpenRouter + OpenAI + Ollama) */}
+                {(draft.provider === "openrouter" || draft.provider === "openai" || draft.provider === "ollama") && selectedModel && (
                   <div className="flex items-start justify-between gap-3 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-2.5">
                     <div className="flex items-start gap-2">
                       <Globe className="h-3.5 w-3.5 mt-0.5 text-primary/60 shrink-0" />
@@ -458,20 +529,29 @@ export function ProjectSidebar({
                           {selectedModel.supportsGrounding
                             ? draft.provider === "openai"
                               ? `Uses ${selectedModel.groundingModelId ?? "search-preview"} for live web access`
-                              : "Adds :online for live search"
+                              : draft.provider === "ollama"
+                                ? hasEmbeddingGemma 
+                                  ? "Uses Ollama Web Search + RAG Smart Filter"
+                                  : "RAG requires embeddinggemma. Run: ollama pull embeddinggemma"
+                                : "Adds :online for live search"
                             : "Not available for this model"}
                         </div>
                       </div>
                     </div>
                     <button
-                      onClick={() => selectedModel.supportsGrounding && setDraft(d => ({ ...d, webGrounding: !d.webGrounding }))}
-                      disabled={!selectedModel.supportsGrounding}
+                      onClick={() => {
+                        if (draft.provider === "ollama" && !hasEmbeddingGemma) return
+                        if (selectedModel.supportsGrounding) {
+                          setDraft(d => ({ ...d, webGrounding: !d.webGrounding }))
+                        }
+                      }}
+                      disabled={!selectedModel.supportsGrounding || (draft.provider === "ollama" && !hasEmbeddingGemma)}
                       className={`relative shrink-0 h-5 w-9 rounded-full transition-all duration-200 ${
-                        draft.webGrounding && selectedModel.supportsGrounding ? "bg-primary" : "bg-white/10"
+                        draft.webGrounding && selectedModel.supportsGrounding && (draft.provider !== "ollama" || hasEmbeddingGemma) ? "bg-primary" : "bg-white/10"
                       } disabled:opacity-30 disabled:cursor-not-allowed`}
                     >
                       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${
-                        draft.webGrounding && selectedModel.supportsGrounding ? "left-5" : "left-0.5"
+                        draft.webGrounding && selectedModel.supportsGrounding && (draft.provider !== "ollama" || hasEmbeddingGemma) ? "left-5" : "left-0.5"
                       }`} />
                     </button>
                   </div>

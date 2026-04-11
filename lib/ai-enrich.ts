@@ -97,6 +97,13 @@ The user message includes a [RESPOND IN: X] directive immediately before the not
 - **No URLs or hyperlinks ever.** If you reference a source, use its name and author only (e.g. "Per Kahneman's *Thinking, Fast and Slow*" or "IPCC AR6 report"). Never generate or guess a URL — broken links are worse than no links.
 - Use markdown sparingly: **bold** for key terms, *italic* for titles. No bullet lists in annotations.
 
+## Confidence Calibration
+- **90-100**: The answer is directly supported by the provided context or search results.
+- **70-89**: The answer is a logical inference based on strong evidence.
+- **50-69**: The answer is a plausible guess based on general knowledge.
+- **<50**: The answer is speculative or uncertain due to lack of information.
+  You MUST return a realistic number based on this scale. Do not default to 100 or 1.
+
 ## Classification Priority
 Use the most specific type. Avoid 'general' unless nothing else fits. 'thesis' is only valid if forcedType is set.
 
@@ -347,27 +354,52 @@ You have live web access. For this note type, include 1–2 real source citation
   const MAX_ENRICH_OUTPUT_TOKENS = 1200
 
   const baseUrl = getBaseUrl(config)
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  const isOllama = config.provider === "ollama"
+  const targetUrl = isOllama ? `${baseUrl}/api/chat` : `${baseUrl}/chat/completions`
+
+  const payload = {
+    model,
+    ...(isOllama
+      ? {
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          stream: false,
+          options: {
+            temperature: 0,
+          },
+        }
+      : {
+          max_tokens: MAX_ENRICH_OUTPUT_TOKENS,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          // OpenAI search-preview models reject both response_format AND temperature;
+          // when web_search_options is present, omit both and rely on the schemaHint
+          // in the system prompt to get structured JSON output.
+          ...(webSearchOptions === undefined
+            ? {
+                response_format: useStrictSchema
+                  ? { type: "json_schema", json_schema: JSON_SCHEMA }
+                  : { type: "json_object" },
+                temperature: 0.1,
+              }
+            : { web_search_options: webSearchOptions }),
+        }),
+  }
+
+  // Use the server-side proxy route to bypass browser CORS/CSP restrictions.
+  const response = await fetch("/api/ai", {
     method: "POST",
-    headers: getProviderHeaders(config),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model,
-      max_tokens: MAX_ENRICH_OUTPUT_TOKENS,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user",   content: userMessage },
-      ],
-      // OpenAI search-preview models reject both response_format AND temperature;
-      // when web_search_options is present, omit both and rely on the schemaHint
-      // in the system prompt to get structured JSON output.
-      ...(webSearchOptions === undefined
-        ? {
-            response_format: useStrictSchema
-              ? { type: "json_schema", json_schema: JSON_SCHEMA }
-              : { type: "json_object" },
-            temperature: 0.1,
-          }
-        : { web_search_options: webSearchOptions }),
+      url: targetUrl,
+      method: "POST",
+      headers: getProviderHeaders(config),
+      body: payload,
+      isGrounding: shouldGround,
     }),
   })
 
@@ -375,7 +407,7 @@ You have live web access. For this note type, include 1–2 real source citation
     throw new Error(await parseProviderError(response))
   }
 
-  let data: Record<string, unknown>
+  let data: any
   try {
     data = await response.json()
   } catch {
@@ -384,12 +416,17 @@ You have live web access. For this note type, include 1–2 real source citation
     )
   }
 
-  const content = (data.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content
+  const content = isOllama
+    ? data.message?.content
+    : (data.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content
+
   if (!content) throw new Error("No content in AI response")
 
   const result = parseEnrichResult(content)
   if (!result) {
-    const finishReason = (data.choices as Array<{ finish_reason?: string }>)?.[0]?.finish_reason
+    const finishReason = !isOllama
+      ? (data.choices as Array<{ finish_reason?: string }>)?.[0]?.finish_reason
+      : undefined
     throw new Error(
       `AI returned unparseable JSON.${finishReason ? ` Finish reason: ${finishReason}.` : ""} Raw: ${content.substring(0, 200)}`
     )
