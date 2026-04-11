@@ -14,9 +14,7 @@ node_modules/
 .claude/
 tsconfig.tsbuildinfo
 next-env.d.ts
-# Internal docs (not for public repo)
+
+# Internal docs
 CLAUDE.md
-ARCHITECTURE.md
-DEMO_TRANSCRIPT.md
-DESIGN_CASE_STUDY.md
 BACKLOG.md
