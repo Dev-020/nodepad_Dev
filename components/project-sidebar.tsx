@@ -414,6 +414,27 @@ export function ProjectSidebar({
                   </p>
                 </div>
 
+                {/* Custom Base URL */}
+                <div className="flex flex-col gap-2">
+                  <label className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+                    Custom Base URL
+                  </label>
+                  <div className="flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2 focus-within:border-primary/50 transition-colors">
+                    <input
+                      type="text"
+                      value={draft.customBaseUrl ?? ""}
+                      onChange={e => setDraft(d => ({ ...d, customBaseUrl: e.target.value }))}
+                      placeholder="Optional — for local/self-hosted endpoints"
+                      className="flex-1 bg-transparent font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/40"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                  <p className="font-mono text-[9px] text-muted-foreground leading-relaxed">
+                    Override the provider URL. Useful for Ollama, LM Studio, vLLM, or other OpenAI-compatible endpoints.
+                  </p>
+                </div>
+
                 {/* Model Selector */}
                 <div className="flex flex-col gap-2">
                   <label className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
