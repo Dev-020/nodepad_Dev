@@ -2,7 +2,7 @@
 
 import { detectContentType } from "@/lib/detect-content-type"
 import { loadAIConfig, getBaseUrl, getProviderHeaders, getModelsForProvider } from "@/lib/ai-settings"
-import type { ContentType } from "@/lib/content-types"
+import { CONTENT_TYPE_CONFIG, type ContentType } from "@/lib/content-types"
 
 // ── Provider error parser ─────────────────────────────────────────────────────
 
@@ -239,8 +239,13 @@ function coerceLooseEnrichResult(content: string): EnrichResult | null {
     ? influencedRaw.split(",").map(p => Number(p.trim())).filter(Number.isFinite)
     : []
 
+  const rawType = contentTypeMatch[1]
+  const contentType = (rawType in CONTENT_TYPE_CONFIG)
+    ? (rawType as ContentType)
+    : "general"
+
   return {
-    contentType:         contentTypeMatch[1] as ContentType,
+    contentType,
     category:            decodeJsonishString(categoryMatch[1]),
     annotation:          decodeJsonishString(annotationMatch[1]),
     confidence:          confidenceRaw == null || confidenceRaw === "null" ? null : Number(confidenceRaw),
@@ -253,7 +258,11 @@ function coerceLooseEnrichResult(content: string): EnrichResult | null {
 function parseEnrichResult(content: string): EnrichResult | null {
   const candidate = extractJsonCandidate(content) ?? content.trim()
   try {
-    return JSON.parse(candidate) as EnrichResult
+    const parsed = JSON.parse(candidate) as EnrichResult
+    if (parsed && !(parsed.contentType in CONTENT_TYPE_CONFIG)) {
+      parsed.contentType = "general"
+    }
+    return parsed
   } catch {
     return coerceLooseEnrichResult(candidate)
   }

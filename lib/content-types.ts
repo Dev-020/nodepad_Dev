@@ -118,3 +118,9 @@ export const CONTENT_TYPE_CONFIG: Record<ContentType, ContentTypeConfig> = {
 }
 
 export const ALL_CONTENT_TYPES = Object.keys(CONTENT_TYPE_CONFIG) as ContentType[]
+
+export function getSafeContentTypeConfig(type: string): ContentTypeConfig {
+  return Object.hasOwn(CONTENT_TYPE_CONFIG, type)
+    ? CONTENT_TYPE_CONFIG[type as ContentType]
+    : CONTENT_TYPE_CONFIG.general
+}

@@ -528,7 +528,9 @@ export function GraphArea({
                 const isHub       = node.degree >= 3 && !node.isSynthesis
 
                 const r      = node.isSynthesis ? R_SYNTH : calcR(node.degree, maxDeg)
-                const config = node.block ? CONTENT_TYPE_CONFIG[node.block.contentType] : null
+                const config = node.block
+                  ? (CONTENT_TYPE_CONFIG[node.block.contentType] ?? CONTENT_TYPE_CONFIG.general)
+                  : null
                 const Icon   = config?.icon ?? null
                 const accent = config?.accentVar ?? "var(--type-thesis)"
 
@@ -691,7 +693,9 @@ export function GraphArea({
           const text = node.isSynthesis
             ? (node.synthesisText ?? "Synthesis")
             : (node.block?.text ?? "")
-          const config = node.block ? CONTENT_TYPE_CONFIG[node.block.contentType] : null
+          const config = node.block
+            ? (CONTENT_TYPE_CONFIG[node.block.contentType] ?? CONTENT_TYPE_CONFIG.general)
+            : null
           const accent = config?.accentVar ?? "var(--type-thesis)"
           const tipX = Math.min(tooltip.x + 14, (selectedId ? dims.w * 0.7 : dims.w) - 300)
           const tipY = tooltip.y - 16

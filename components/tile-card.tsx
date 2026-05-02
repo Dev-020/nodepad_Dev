@@ -6,7 +6,7 @@ import { X, Check, Pin, RefreshCw, ChevronDown, ChevronRight, ChevronLeft, Link 
 import { motion } from "framer-motion"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { CONTENT_TYPE_CONFIG, type ContentType } from "@/lib/content-types"
+import { CONTENT_TYPE_CONFIG, type ContentType, getSafeContentTypeConfig } from "@/lib/content-types"
 
 export interface TextBlock {
   id: string
@@ -133,9 +133,9 @@ export const TileCard = memo(function TileCard({
     })
   }, [block.timestamp, isMounted])
 
-  const config = CONTENT_TYPE_CONFIG[block.contentType]
+  const config = getSafeContentTypeConfig(block.contentType)
   const Icon = config.icon
-  const accent = config.accentVar
+  const accent = config.accentVar ?? "var(--type-general)"
   const isTask = block.contentType === "task"
 
   // Auto-size + focus for the main text editing textarea

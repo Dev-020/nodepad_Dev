@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { createPortal } from "react-dom"
-import { CONTENT_TYPE_CONFIG, type ContentType } from "@/lib/content-types"
+import { CONTENT_TYPE_CONFIG, type ContentType, getSafeContentTypeConfig } from "@/lib/content-types"
 import type { TextBlock } from "@/components/tile-card"
 import { Link as LinkIcon, Pin, RefreshCw, Tag, X } from "lucide-react"
 import ReactMarkdown from "react-markdown"
@@ -142,9 +142,9 @@ export function GraphDetailPanel({
     )
   }
 
-  const config = CONTENT_TYPE_CONFIG[block.contentType]
+  const config = getSafeContentTypeConfig(block.contentType)
   const Icon   = config.icon
-  const accent = config.accentVar
+  const accent = config.accentVar ?? "var(--type-general)"
 
   // Header colour — same logic as tile-card
   const headerBg = block.contentType === "thesis"
@@ -321,7 +321,7 @@ export function GraphDetailPanel({
             <div className="h-px bg-border/40 mb-3" />
             <div className="space-y-1">
               {connectedBlocks.map(b => {
-                const bConfig = CONTENT_TYPE_CONFIG[b.contentType]
+                const bConfig = getSafeContentTypeConfig(b.contentType)
                 const BIcon   = bConfig.icon
                 return (
                   <button
@@ -329,7 +329,7 @@ export function GraphDetailPanel({
                     onClick={() => onSelectNode(b.id)}
                     className="flex w-full items-start gap-2.5 rounded-sm bg-secondary/30 px-2.5 py-2 text-left hover:bg-secondary/60 transition-colors group"
                   >
-                    <BIcon className="mt-0.5 h-3 w-3 flex-shrink-0" style={{ color: bConfig.accentVar }} />
+                    <BIcon className="mt-0.5 h-3 w-3 flex-shrink-0" style={{ color: bConfig.accentVar ?? "var(--type-general)" }} />
                     <span className="text-xs text-muted-foreground group-hover:text-foreground line-clamp-2 leading-relaxed transition-colors">
                       {b.text}
                     </span>
