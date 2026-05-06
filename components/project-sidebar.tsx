@@ -119,7 +119,8 @@ export function ProjectSidebar({
         setIsCustomModel(false)
       }
     }
-  }, [showSettings, aiSettings, ollamaModels])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSettings]) // Only sync when the panel is opened, NOT when aiSettings updates in background
 
   // Jump straight to settings when requested externally
   useEffect(() => {

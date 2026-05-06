@@ -12,7 +12,7 @@ export interface AIModel {
   groundingModelId?: string
 }
 
-export type AIProvider = "openrouter" | "openai" | "zai" | "ollama"
+export type AIProvider = "openrouter" | "openai" | "zai" | "ollama" | "geminicli"
 
 export interface AIProviderPreset {
   id: AIProvider
@@ -50,6 +50,13 @@ export const AI_PROVIDER_PRESETS: AIProviderPreset[] = [
     baseUrl: "https://ollama.com",
     keyUrl: "https://ollama.com/cloud",
     keyPlaceholder: "Your Ollama Cloud API Key",
+  },
+  {
+    id: "geminicli",
+    label: "Gemini CLI",
+    baseUrl: "internal://geminicli",
+    keyUrl: "https://geminicli.com",
+    keyPlaceholder: "No key required (uses local auth)",
   },
 ]
 
@@ -181,10 +188,28 @@ export const ZAI_MODELS: AIModel[] = [
   },
 ]
 
+export const GEMINICLI_MODELS: AIModel[] = [
+  {
+    id: "gemini-3-pro-preview",
+    label: "Gemini 3 Pro",
+    shortLabel: "G3 Pro",
+    description: "Highest reasoning & coding capability (CLI)",
+    supportsGrounding: false,
+  },
+  {
+    id: "gemini-3-flash-preview",
+    label: "Gemini 3 Flash",
+    shortLabel: "G3 Flash",
+    description: "Fast, high-quality reasoning (CLI)",
+    supportsGrounding: false,
+  },
+]
+
 export function getModelsForProvider(provider: AIProvider): AIModel[] {
   if (provider === "openai") return OPENAI_MODELS
   if (provider === "zai")    return ZAI_MODELS
   if (provider === "ollama") return [] // Loaded dynamically from proxy
+  if (provider === "geminicli") return GEMINICLI_MODELS
   return AI_MODELS // openrouter + safe fallback for any stale localStorage value
 }
 
@@ -228,7 +253,7 @@ export interface AIConfig {
 
 export function loadAIConfig(): AIConfig | null {
   const s = loadSettings()
-  if (!s.apiKey) return null
+  if (!s.apiKey && s.provider !== "geminicli") return null
   
   // Use the persisted Ollama models if they exist, otherwise the static provider list
   const models = s.provider === "ollama" ? (s.ollamaModels ?? []) : getModelsForProvider(s.provider)
@@ -244,7 +269,7 @@ export function loadAIConfig(): AIConfig | null {
     s.webGrounding &&
     (model?.supportsGrounding ?? false)
     
-  return { apiKey: s.apiKey, modelId, supportsGrounding, provider: s.provider, customBaseUrl: s.customBaseUrl }
+  return { apiKey: s.apiKey || "local-cli", modelId, supportsGrounding, provider: s.provider, customBaseUrl: s.customBaseUrl }
 }
 
 export function getBaseUrl(config: AIConfig): string {

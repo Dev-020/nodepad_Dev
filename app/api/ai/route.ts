@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
+import { spawn } from "child_process"
+import fs from "fs/promises"
+import path from "path"
+import os from "os"
 
 // ── RAG UTILITIES ─────────────────────────────────────────────────────────────
 
@@ -153,6 +157,107 @@ export async function POST(req: NextRequest) {
 
   try {
     const { url, method, headers, body, isGrounding } = await req.json()
+
+    // ── GEMINI CLI ROUTING ───────────────────────────────────────────────────
+    if (url && url.startsWith("internal://geminicli")) {
+      const model = body.model
+      // Combine all messages into a single prompt for the CLI
+      const fullPrompt = body.messages
+        .map((m: any) => `${m.role.toUpperCase()}:\n${m.content}`)
+        .join("\n\n")
+
+      // Use a temporary directory to avoid workspace crawling latency
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "nodepad-gemini-"))
+      
+      try {
+        console.log(` ○ [Gemini CLI] Executing ${model}...`)
+        const startTime = Date.now()
+        
+        // Define command arguments for spawn (following documentation patterns)
+        const args = [
+          "--output-format", "json",
+          "--policy", "simple",        // Disable tool execution / agentic behavior
+          "--approval-mode", "yolo",
+          "--skip-trust",
+          "--raw-output",
+          "--accept-raw-output-risk",
+          "-m", model,
+          "Enrich the note provided in standard input according to the JSON schema instructions provided in that same input."
+        ]
+
+        return await new Promise<NextResponse>((resolve) => {
+          const child = spawn("gemini", args, { cwd: tmpDir, shell: true })
+          let stdoutData = ""
+          let stderrData = ""
+
+          // Stream fullPrompt into stdin to bypass shell character limits
+          child.stdin.write(fullPrompt)
+          child.stdin.end()
+
+          // Stream output to terminal in real-time
+          child.stdout.on("data", (data) => {
+            const chunk = data.toString()
+            stdoutData += chunk
+            process.stdout.write(chunk)
+          })
+
+          child.stderr.on("data", (data) => {
+            const chunk = data.toString()
+            stderrData += chunk
+            process.stderr.write(chunk)
+          })
+
+          // Handle process completion
+          child.on("close", (code) => {
+            const duration = ((Date.now() - startTime) / 1000).toFixed(2)
+            if (code === 0) {
+              console.log(`\n ✓ [Gemini CLI] Completed in ${duration}s`)
+              try {
+                const wrapper = JSON.parse(stdoutData)
+                // Extract structured data from .response field as per documentation
+                const aiContent = wrapper.response || stdoutData.trim()
+                
+                resolve(NextResponse.json({
+                  choices: [{
+                    message: { role: "assistant", content: aiContent },
+                    finish_reason: "stop",
+                  }],
+                }))
+              } catch (e) {
+                console.error("\n ⨯ [Gemini CLI] Failed to parse JSON output")
+                resolve(NextResponse.json({ error: "Invalid CLI JSON output" }, { status: 500 }))
+              }
+            } else {
+              console.error(`\n ⨯ [Gemini CLI] Failed with code ${code} after ${duration}s`)
+              resolve(NextResponse.json(
+                { error: `CLI failed with code ${code}. Check terminal for logs.` },
+                { status: 500 }
+              ))
+            }
+          })
+
+          // Handle execution errors
+          child.on("error", (err) => {
+            console.error(`\n ⨯ [Gemini CLI] Spawn error:`, err)
+            resolve(NextResponse.json({ error: err.message }, { status: 500 }))
+          })
+
+          // Add a 90-second safety timeout
+          setTimeout(() => {
+            if (child.exitCode === null) {
+              child.kill()
+              console.error("\n ⨯ [Gemini CLI] Process timed out after 90s")
+              resolve(NextResponse.json({ error: "CLI Timeout" }, { status: 504 }))
+            }
+          }, 90000)
+        })
+
+      } finally {
+        // Short delay to ensure process handle is released before rmdir (Windows fix)
+        await new Promise(r => setTimeout(r, 2000))
+        await fs.rm(tmpDir, { recursive: true, force: true })
+      }
+    }
 
     // 1. URL Validation & SSRF Protection
     const security = validateUrlSecurity(url)
