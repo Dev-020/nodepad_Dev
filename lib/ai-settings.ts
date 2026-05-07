@@ -190,18 +190,11 @@ export const ZAI_MODELS: AIModel[] = [
 
 export const GEMINICLI_MODELS: AIModel[] = [
   {
-    id: "gemini-3-pro-preview",
-    label: "Gemini 3 Pro",
-    shortLabel: "G3 Pro",
-    description: "Highest reasoning & coding capability (CLI)",
-    supportsGrounding: false,
-  },
-  {
-    id: "gemini-3-flash-preview",
-    label: "Gemini 3 Flash",
-    shortLabel: "G3 Flash",
-    description: "Fast, high-quality reasoning (CLI)",
-    supportsGrounding: false,
+    id: "gemini-auto",
+    label: "Gemini Auto",
+    shortLabel: "Gemini Auto",
+    description: "Automatically selects the best model for the task",
+    supportsGrounding: true,
   },
 ]
 
@@ -265,7 +258,7 @@ export function loadAIConfig(): AIConfig | null {
   
   // Only allow grounding if the provider supports it AND the specific model supports it
   const supportsGrounding =
-    (s.provider === "openrouter" || s.provider === "openai" || s.provider === "ollama") &&
+    (s.provider === "openrouter" || s.provider === "openai" || s.provider === "ollama" || s.provider === "geminicli") &&
     s.webGrounding &&
     (model?.supportsGrounding ?? false)
     

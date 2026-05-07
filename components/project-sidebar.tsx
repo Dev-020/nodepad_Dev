@@ -514,7 +514,7 @@ export function ProjectSidebar({
                                     </div>
                                     <div className="font-mono text-[9px] text-muted-foreground">{model.description}</div>
                                   </div>
-                                  {model.supportsGrounding && (draft.provider === "openrouter" || draft.provider === "openai" || draft.provider === "ollama") && <Globe className="ml-auto h-3 w-3 shrink-0 text-primary/50" />}
+                                  {model.supportsGrounding && (draft.provider === "openrouter" || draft.provider === "openai" || draft.provider === "ollama" || draft.provider === "geminicli") && <Globe className="ml-auto h-3 w-3 shrink-0 text-primary/50" />}
                                 </button>
                               ))}
                               <button
@@ -540,8 +540,8 @@ export function ProjectSidebar({
                   )}
                 </div>
 
-                {/* Web Grounding (OpenRouter + OpenAI + Ollama) */}
-                {(draft.provider === "openrouter" || draft.provider === "openai" || draft.provider === "ollama") && selectedModel && (
+                {/* Web Grounding (OpenRouter + OpenAI + Ollama + GeminiCLI) */}
+                {(draft.provider === "openrouter" || draft.provider === "openai" || draft.provider === "ollama" || draft.provider === "geminicli") && selectedModel && (
                   <div className="flex items-start justify-between gap-3 rounded-md border border-white/5 bg-white/[0.02] px-2.5 py-2.5">
                     <div className="flex items-start gap-2">
                       <Globe className="h-3.5 w-3.5 mt-0.5 text-primary/60 shrink-0" />
@@ -555,7 +555,9 @@ export function ProjectSidebar({
                                 ? hasEmbeddingGemma 
                                   ? "Uses Ollama Web Search + RAG Smart Filter"
                                   : "RAG requires embeddinggemma. Run: ollama pull embeddinggemma"
-                                : "Adds :online for live search"
+                                : draft.provider === "geminicli"
+                                  ? "Uses native Gemini search & fetch tools"
+                                  : "Adds :online for live search"
                             : "Not available for this model"}
                         </div>
                       </div>

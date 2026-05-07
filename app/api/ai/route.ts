@@ -58,6 +58,70 @@ async function getEmbeddings(input: string | string[]): Promise<{ embeddings: nu
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "::1"])
 const ALLOWED_PORTS = new Set(["11434", "1234"]) // Ollama, LM Studio
 
+/**
+ * Executes a Gemini CLI command with stdin support and clean, high-signal logging.
+ */
+async function runGeminiCli(command: string, args: string[], stdinData: string, cwd: string): Promise<{ success: boolean; content: string; error?: string }> {
+  return new Promise((resolve) => {
+    // Escape and quote arguments to prevent shell injection and silence DEP0190
+    const escapedArgs = args.map(arg => `"${arg.replace(/"/g, '\\"')}"`).join(" ")
+    const child = spawn(`${command} ${escapedArgs}`, { cwd, shell: true })
+    let stdoutData = ""
+    let stderrData = ""
+
+    child.stdin.write(stdinData)
+    child.stdin.end()
+
+    child.stdout.on("data", (data) => {
+      stdoutData += data.toString()
+    })
+
+    child.stderr.on("data", (data) => {
+      stderrData += data.toString()
+      // Log critical system errors if they occur
+      if (stderrData.includes("AttachConsole failed")) {
+        console.warn(" ! [Gemini CLI] PTY Warning: Non-interactive mode active.")
+      }
+    })
+
+    child.on("close", (code) => {
+      if (code === 0) {
+        try {
+          const wrapper = JSON.parse(stdoutData)
+          
+          // Index into stats to log tool usage summary
+          const tools = wrapper.stats?.tools?.byName || {}
+          Object.keys(tools).forEach(toolName => {
+            const count = tools[toolName].count || 0
+            if (count > 0) {
+              console.log(` ✓ [Gemini CLI] Tool: ${toolName} (${count} call${count > 1 ? "s" : ""})`)
+            }
+          })
+
+          resolve({ success: true, content: wrapper.response || stdoutData.trim() })
+        } catch (e) {
+          resolve({ success: true, content: stdoutData.trim() }) 
+        }
+      } else {
+        const errorMsg = stderrData.includes("429") ? "Rate Limit Exceeded" : `Exit Code ${code}`
+        resolve({ success: false, content: "", error: errorMsg })
+      }
+    })
+
+    child.on("error", (err) => {
+      resolve({ success: false, content: "", error: err.message })
+    })
+
+    // Safety timeout per phase
+    setTimeout(() => {
+      if (child.exitCode === null) {
+        child.kill()
+        resolve({ success: false, content: "", error: "Timeout" })
+      }
+    }, 480000)
+  })
+}
+
 function isLocalUrl(urlStr: string): boolean {
   try {
     const url = new URL(urlStr)
@@ -160,112 +224,103 @@ export async function POST(req: NextRequest) {
 
     // ── GEMINI CLI ROUTING ───────────────────────────────────────────────────
     if (url && url.startsWith("internal://geminicli")) {
-      const model = body.model
-      // Combine all messages into a single prompt for the CLI
       const fullPrompt = body.messages
         .map((m: any) => `${m.role.toUpperCase()}:\n${m.content}`)
         .join("\n\n")
 
-      // Use a temporary directory to avoid workspace crawling latency
       const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "nodepad-gemini-"))
       
       try {
-        console.log(` ○ [Gemini CLI] Executing ${model}...`)
+        let finalPrompt = fullPrompt
+
+        // ── STAGE 1: AUTONOMOUS RESEARCH (IF GROUNDING ENABLED) ──────────────
+        if (isGrounding) {
+          console.log(` ○ [Gemini CLI] Stage 1: Researching topic...`)
+          const researchStartTime = Date.now()
+          
+          const researchPrompt = `You are an expert researcher. Your task is to provide deep background context for the current node, informed by the surrounding context.
+          
+1. Analyze the current node and its relationship to other nodes in the workspace.
+2. Generate multiple search queries to cover different aspects of the topic.
+3. Perform the searches and fetch the content of the most relevant results using your native tools.
+4. Provide a detailed, fact-dense research summary.
+5. Include a "SOURCES" section at the end with the URLs and Titles you used.
+
+Respond ONLY with the research summary and sources.`
+
+          const researchArgs = [
+            "--output-format", "json",
+            "--approval-mode", "yolo",
+            "--skip-trust",
+            "--raw-output",
+            "--accept-raw-output-risk",
+            researchPrompt
+          ]
+
+          try {
+            const researchResult = await runGeminiCli("gemini", researchArgs, fullPrompt, tmpDir)
+            if (researchResult.success) {
+              const researchDuration = ((Date.now() - researchStartTime) / 1000).toFixed(2)
+              console.log(` ✓ [Gemini CLI] Research completed in ${researchDuration}s`)
+              finalPrompt = `### [VERIFIED WEB CONTEXT]\n${researchResult.content}\n\n---\n\n${fullPrompt}`
+            } else {
+              console.warn(` ! [Gemini CLI] Research skipped: ${researchResult.error}`)
+            }
+          } catch (e) {
+            console.warn(` ! [Gemini CLI] Research failed, proceeding without web context.`)
+          }
+        }
+
+        // ── STAGE 2: STRUCTURED ENRICHMENT ───────────────────────────────────
+        console.log(` ○ [Gemini CLI] Stage 2: Generating enrichment...`)
         const startTime = Date.now()
         
-        // Define command arguments for spawn (following documentation patterns)
         const args = [
           "--output-format", "json",
-          "--policy", "simple",        // Disable tool execution / agentic behavior
+          "--policy", "simple",        // Stable structured output
           "--approval-mode", "yolo",
           "--skip-trust",
           "--raw-output",
           "--accept-raw-output-risk",
-          "-m", model,
-          "Enrich the note provided in standard input according to the JSON schema instructions provided in that same input."
+          "Enrich the note provided in standard input according to the JSON schema instructions provided in that same input. CRITICAL: Do NOT use any tools or file operations. Return ONLY the final JSON object."
         ]
 
-        return await new Promise<NextResponse>((resolve) => {
-          const child = spawn("gemini", args, { cwd: tmpDir, shell: true })
-          let stdoutData = ""
-          let stderrData = ""
+        const finalResult = await runGeminiCli("gemini", args, finalPrompt, tmpDir)
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2)
 
-          // Stream fullPrompt into stdin to bypass shell character limits
-          child.stdin.write(fullPrompt)
-          child.stdin.end()
-
-          // Stream output to terminal in real-time
-          child.stdout.on("data", (data) => {
-            const chunk = data.toString()
-            stdoutData += chunk
-            process.stdout.write(chunk)
+        if (finalResult.success) {
+          console.log(` ✓ [Gemini CLI] Completed in ${duration}s`)
+          return NextResponse.json({
+            choices: [{
+              message: { role: "assistant", content: finalResult.content },
+              finish_reason: "stop",
+            }],
           })
-
-          child.stderr.on("data", (data) => {
-            const chunk = data.toString()
-            stderrData += chunk
-            process.stderr.write(chunk)
-          })
-
-          // Handle process completion
-          child.on("close", (code) => {
-            const duration = ((Date.now() - startTime) / 1000).toFixed(2)
-            if (code === 0) {
-              console.log(`\n ✓ [Gemini CLI] Completed in ${duration}s`)
-              try {
-                const wrapper = JSON.parse(stdoutData)
-                // Extract structured data from .response field as per documentation
-                const aiContent = wrapper.response || stdoutData.trim()
-                
-                resolve(NextResponse.json({
-                  choices: [{
-                    message: { role: "assistant", content: aiContent },
-                    finish_reason: "stop",
-                  }],
-                }))
-              } catch (e) {
-                console.error("\n ⨯ [Gemini CLI] Failed to parse JSON output")
-                resolve(NextResponse.json({ error: "Invalid CLI JSON output" }, { status: 500 }))
-              }
-            } else {
-              console.error(`\n ⨯ [Gemini CLI] Failed with code ${code} after ${duration}s`)
-              resolve(NextResponse.json(
-                { error: `CLI failed with code ${code}. Check terminal for logs.` },
-                { status: 500 }
-              ))
-            }
-          })
-
-          // Handle execution errors
-          child.on("error", (err) => {
-            console.error(`\n ⨯ [Gemini CLI] Spawn error:`, err)
-            resolve(NextResponse.json({ error: err.message }, { status: 500 }))
-          })
-
-          // Add a 90-second safety timeout
-          setTimeout(() => {
-            if (child.exitCode === null) {
-              child.kill()
-              console.error("\n ⨯ [Gemini CLI] Process timed out after 90s")
-              resolve(NextResponse.json({ error: "CLI Timeout" }, { status: 504 }))
-            }
-          }, 90000)
-        })
+        } else {
+          console.error(` ⨯ [Gemini CLI] Failed after ${duration}s: ${finalResult.error}`)
+          return NextResponse.json({ error: finalResult.error }, { status: 500 })
+        }
 
       } finally {
-        // Short delay to ensure process handle is released before rmdir (Windows fix)
-        await new Promise(r => setTimeout(r, 2000))
-        await fs.rm(tmpDir, { recursive: true, force: true })
+        // Safe, non-blocking cleanup for Windows stabilization
+        (async () => {
+          try {
+            await new Promise(r => setTimeout(r, 5000)) // Wait for OS to release locks
+            await fs.rm(tmpDir, { recursive: true, force: true })
+          } catch (e) {
+            // Silently ignore cleanup errors to prevent crashing the response
+          }
+        })()
       }
     }
 
-    // 1. URL Validation & SSRF Protection
+    // ── STANDARD PROXY LOGIC ────────────────────────────────────────────────
+
     const security = validateUrlSecurity(url)
     if (!security.isValid) {
       return NextResponse.json({ error: security.error }, { status: 400 })
     }
 
-    // 2. Auth Guard: Strip keys for local requests
     const safeHeaders = { ...headers }
     if (security.isLocal) {
       delete safeHeaders["Authorization"]
