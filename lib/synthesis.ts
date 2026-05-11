@@ -131,6 +131,16 @@ async function callAI(config: AIConfig, targetUrl: string, payload: object): Pro
   return content as string
 }
 
+function dumpRawResponse(label: string, raw: string): void {
+  const blob = new Blob([raw], { type: "text/plain;charset=utf-8" })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement("a")
+  a.href     = url
+  a.download = `${label}-raw.txt`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 function extractJson(text: string): string {
   const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/)
   if (fenced) return fenced[1].trim()
@@ -329,14 +339,13 @@ export async function callSynthesize(
   ], 4000)
 
   const raw = await callAI(config, targetUrl, payload)
-  console.log("[synthesis] callSynthesize raw response:", raw.slice(0, 1000))
 
   let parsed: { summary?: string; sections?: Omit<SynthesisSection, "nodeIds">[] }
   try {
     parsed = JSON.parse(extractJson(raw))
-  } catch (e) {
-    console.error("[synthesis] callSynthesize JSON parse failed. Raw:", raw.slice(0, 500))
-    throw new Error(`Synthesis: AI returned non-JSON. Raw start: ${raw.slice(0, 120)}`)
+  } catch {
+    dumpRawResponse("synthesis-call-c", raw)
+    throw new Error("Synthesis: AI returned non-JSON. Raw response saved to synthesis-call-c-raw.txt")
   }
 
   // Normalise: some models wrap the output under a top-level key
@@ -354,8 +363,8 @@ export async function callSynthesize(
     null
 
   if (!normalisedSummary || !normalisedSections) {
-    console.error("[synthesis] callSynthesize unexpected shape. Keys:", Object.keys(root))
-    throw new Error(`Synthesis: unexpected response shape. Keys found: ${Object.keys(root).join(", ")}`)
+    dumpRawResponse("synthesis-call-c", raw)
+    throw new Error(`Synthesis: unexpected response shape (keys: ${Object.keys(root).join(", ")}). Raw response saved to synthesis-call-c-raw.txt`)
   }
 
   // Merge AI-generated prose with node IDs from the clustering step (by index)
