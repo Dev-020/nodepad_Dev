@@ -144,34 +144,97 @@
 - **Summary**: Fixed a runtime crash where `TileCard` and other UI components failed when encountering unknown content types hallucinated by the LLM. Implemented `getSafeContentTypeConfig` and added input validation.
 
 ---
-## 🛠 Environment & System Info
-- **Orion Core Version:** v0.1.0
-- **Frontend/Client:** Web App
-- **LLM Backend:** [x] Gemini CLI [x] Ollama (Local)
-- **OS:** [x] Windows [ ] macOS [ ] Linux
 
-## 🐛 Bug Description
-A runtime crash where `TileCard` failed to find an icon for an unknown content type.
+## 🔭 Upcoming Features
 
-## 🕹 Reproduction Steps
-1. Enter a prompt that causes the AI to return an unknown content type.
-2. Observe the application crash with a TypeError.
+### [#022] Obsidian Plugin — Core Infrastructure
+- **Status**: `In Progress` | **Priority**: `P1` | **Labels**: `Feature`, `Obsidian`, `Architecture`
+- **Created**: 2026-05-11
+- **Description**: Port the nodepad React UI into Obsidian as a first-class plugin using the `TextFileView` API. `.nodepad` files live directly in the vault and auto-save on every state change — no manual export step. Renders all three view modes (Tiling, Kanban, Graph) inside an Obsidian leaf, themed via Obsidian's own CSS variables.
+- **Scope**:
+    - `plugin/src/main.ts` — registers `.nodepad` extension, ribbon icon, command palette entry
+    - `plugin/src/view.tsx` — mounts React into the Obsidian leaf, reads/writes vault file via `requestSave()`
+    - `plugin/src/styles.css` — maps Tailwind tokens to Obsidian CSS variables for automatic theme adaptation
+    - `plugin/esbuild.config.mjs` — bundles all shared `lib/` and `components/` from the local fork
+    - Component patches — `isPlugin` mode in `VimInput` (hides Projects nav), portal scoping in `StatusBar`, `AboutPanel`, `Sheet`
+- **Reference**: Upstream PR [mskayyali/nodepad#47](https://github.com/mskayyali/nodepad/pull/47) — cherry-picking plugin infrastructure only, skipping Anthropic provider additions.
 
-## ✅ Expected Behavior
-The UI should fall back to the "General" note style.
+### [#023] Obsidian Plugin — Obsidian Settings UI
+- **Status**: `Open` | **Priority**: `P1` | **Labels**: `Feature`, `Obsidian`, `UX`
+- **Created**: 2026-05-11
+- **Description**: In-Obsidian settings tab (Settings → Nodepad) for configuring the AI provider, model, and API key without touching the web app. Settings are stored in `.obsidian/plugins/nodepad/data.json`, local to the vault and never synced externally.
+- **Scope**:
+    - Provider dropdown (OpenRouter, OpenAI, Z.ai, Ollama, Gemini CLI)
+    - API key field (hidden for keyless providers like Gemini CLI and local Ollama)
+    - Model ID input with per-provider defaults
+    - `plugin/src/settings.ts` — `NodepadSettingTab` extending Obsidian's `PluginSettingTab`
 
-## ❌ Actual Behavior
-The application crashes (TypeError: icon of undefined).
+### [#024] Obsidian Plugin — CLI Provider Bridge (`child_process`)
+- **Status**: `Open` | **Priority**: `P1` | **Labels**: `Feature`, `Obsidian`, `Architecture`
+- **Created**: 2026-05-11
+- **Description**: Shared infrastructure in `plugin/src/ai-adapter.ts` for invoking local CLI tools as subprocesses via Node.js `child_process` inside Obsidian's Electron environment. This is the prerequisite that makes both Gemini CLI and future Claude Code work in the plugin — neither can be called via HTTP, both need to be spawned as local processes. The web app already handles this server-side in `/api/ai`; this is the equivalent for the plugin context.
+- **Scope**:
+    - `spawnCLI(binary, args, stdinPayload)` — generic subprocess helper with stdout capture and timeout
+    - Stdin piping for high-context prompts (mirrors existing web app pattern)
+    - JSON extraction from CLI response wrappers (reuse logic from `lib/ai-ghost.ts`)
+    - Error handling: binary not found, non-zero exit code, malformed output
 
-## 📄 Relevant Logs / Output
-```text
-[browser] Uncaught TypeError: Cannot read properties of undefined (reading 'icon')
-    at TileCard (components/tile-card.tsx:137:23)
-```
+### [#025] Obsidian Plugin — Ollama Provider Support
+- **Status**: `Open` | **Priority**: `P1` | **Labels**: `Feature`, `Obsidian`, `Ollama`
+- **Created**: 2026-05-11
+- **Description**: Enable Ollama (both local and Cloud) as an AI provider within the Obsidian plugin. Ollama uses a different request shape than OpenAI-compatible providers (`/api/chat` instead of `/chat/completions`, no `response_format`, `stream: false`). Since `requestUrl()` in Obsidian's Electron bypasses CORS, local Ollama (`localhost:11434`) works directly without the `/api/ai` proxy — actually cleaner than the web app path.
+- **Scope**:
+    - Ollama request shape in `plugin/src/ai-adapter.ts` (port from `lib/ai-enrich.ts`)
+    - Cloud vs local routing (mirrors existing `getBaseUrl` logic)
+    - Dynamic model discovery via `requestUrl("http://localhost:11434/api/tags")`
+    - No RAG/embedding support in initial version (scoped to enrichment and ghost synthesis)
 
-## 💡 Additional Context
-Fixed by adding safe lookups and input validation.
+### [#026] Obsidian Plugin — Gemini CLI Provider Support
+- **Status**: `Open` | **Priority**: `P1` | **Labels**: `Feature`, `Obsidian`, `Gemini-CLI`
+- **Created**: 2026-05-11
+- **Description**: Enable Gemini CLI as a provider in the Obsidian plugin via the `child_process` bridge (#024). In the web app, Gemini CLI calls are handled server-side in `/api/ai`; in the plugin they are spawned directly from Obsidian's Electron process. Requires Gemini CLI to be installed and authenticated on the host machine. Web grounding via Gemini's native `google_web_search` tool is preserved since it runs inside the CLI itself.
+- **Scope**:
+    - `fetchGeminiCLI(prompt, options)` in `plugin/src/ai-adapter.ts` using the `child_process` bridge
+    - Stdin piping for enrichment prompts (same pattern as web app)
+    - `--policy simple` flag for structured output, two-stage web grounding for RAG
+    - Settings UI: no API key field; show auth status / binary detection
+    - Graceful error if `gemini` binary is not found on PATH
+
+### [#027] Obsidian Plugin — Structured Study Guide Export to Vault
+- **Status**: `Open` | **Priority**: `P2` | **Labels**: `Feature`, `Obsidian`, `AI`
+- **Created**: 2026-05-11
+- **Description**: On-demand command that takes enriched blocks from the current `.nodepad` canvas and writes a structured Obsidian-native `.md` file into the vault. Unlike the existing one-shot markdown export, this produces properly formatted study guides with frontmatter, `[[backlinks]]` to related vault notes, section headers per category, and source citations. Acts as the bridge from nodepad's "raw idea staging area" into Obsidian's permanent knowledge graph.
+- **Scope**:
+    - AI enrichment pass over all blocks to generate section groupings and a study guide outline
+    - Markdown generation with YAML frontmatter (`tags`, `created`, `source: nodepad`)
+    - `[[wikilink]]` insertion for terms that match existing vault note titles (via `app.vault.getMarkdownFiles()`)
+    - Output path: configurable folder (default: vault root), slugified from canvas name
+    - Command palette entry: "Export as Study Guide"
+- **Open Questions**:
+    - Should the export be a destructive replacement (overwrite) or always create a new versioned file?
+    - Should tags be pulled from nodepad's `category` field or generated fresh by the AI?
+
+### [#028] Obsidian Plugin — Human-in-the-Loop Review Before Vault Write
+- **Status**: `Open` | **Priority**: `P2` | **Labels**: `Feature`, `Obsidian`, `UX`
+- **Created**: 2026-05-11
+- **Description**: Before any structured `.md` file is written to the vault (#027), present the user with a review panel showing the proposed study guide. The user can edit sections, approve, or cancel. Ensures the AI output is supervised before it becomes a permanent vault note. Fits the stated design goal: the AI enriches, the human decides.
+- **Scope**:
+    - Preview panel (modal or sidebar) showing the rendered markdown before write
+    - Section-level approve/reject toggles (keep this section, drop that one)
+    - Inline editing of AI-generated text before commit
+    - "Write to Vault" confirmation button triggers the actual `app.vault.create()` call
 
 ---
-> [!IMPORTANT]
-> **AI-Generated Report:** This issue was drafted by an AI Agent (Gemini CLI) and reviewed/approved by the repository owner before submission.
+
+## 🔭 Future Features (Not This Session)
+
+### [#029] Claude Code AI Provider
+- **Status**: `Planned` | **Priority**: `P2` | **Labels**: `Feature`, `AI`, `Claude-Code`
+- **Created**: 2026-05-11
+- **Description**: Integrate the `claude` CLI (Claude Code) as a local AI provider for both the web app and the Obsidian plugin. Claude Code authenticates via local account credentials — no API key required. Uses the same `child_process` bridge established in #024 for the plugin, and the existing `/api/ai` server route for the web app.
+- **Scope**:
+    - `claude --print "<prompt>" --output-format json` for non-interactive enrichment
+    - Web grounding via Claude Code's built-in web access (`--allowedTools web_search`)
+    - Settings UI: no API key field; binary detection and auth status indicator
+    - Shared `child_process` helper reused from Gemini CLI implementation (#024)
+- **Prerequisite**: #024 (CLI Provider Bridge) must be complete first.
