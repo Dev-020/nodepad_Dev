@@ -329,17 +329,37 @@ export async function callSynthesize(
   ], 4000)
 
   const raw = await callAI(config, targetUrl, payload)
+  console.log("[synthesis] callSynthesize raw response:", raw.slice(0, 1000))
 
-  let parsed: { summary: string; sections: Omit<SynthesisSection, "nodeIds">[] }
+  let parsed: { summary?: string; sections?: Omit<SynthesisSection, "nodeIds">[] }
   try {
     parsed = JSON.parse(extractJson(raw))
-    if (!parsed.summary || !Array.isArray(parsed.sections)) throw new Error("bad shape")
-  } catch {
-    throw new Error("Synthesis: could not parse AI response. Try again.")
+  } catch (e) {
+    console.error("[synthesis] callSynthesize JSON parse failed. Raw:", raw.slice(0, 500))
+    throw new Error(`Synthesis: AI returned non-JSON. Raw start: ${raw.slice(0, 120)}`)
+  }
+
+  // Normalise: some models wrap the output under a top-level key
+  const root = (parsed as Record<string, unknown>)
+  const normalisedSections =
+    Array.isArray(root.sections)     ? root.sections as Omit<SynthesisSection, "nodeIds">[] :
+    Array.isArray(root.data)         ? root.data as Omit<SynthesisSection, "nodeIds">[] :
+    Array.isArray(root.synthesis)    ? root.synthesis as Omit<SynthesisSection, "nodeIds">[] :
+    null
+
+  const normalisedSummary =
+    typeof root.summary === "string"  ? root.summary :
+    typeof root.overview === "string" ? root.overview :
+    typeof root.description === "string" ? root.description :
+    null
+
+  if (!normalisedSummary || !normalisedSections) {
+    console.error("[synthesis] callSynthesize unexpected shape. Keys:", Object.keys(root))
+    throw new Error(`Synthesis: unexpected response shape. Keys found: ${Object.keys(root).join(", ")}`)
   }
 
   // Merge AI-generated prose with node IDs from the clustering step (by index)
-  const sections: SynthesisSection[] = parsed.sections.map((s, i) => ({
+  const sections: SynthesisSection[] = normalisedSections.map((s, i) => ({
     heading:          s.heading ?? clusters[i]?.sectionName ?? `Section ${i + 1}`,
     intro:            s.intro ?? "",
     nodeIds:          clusters[i]?.nodeIds ?? [],
@@ -347,7 +367,7 @@ export async function callSynthesize(
     gaps:             s.gaps ?? [],
   }))
 
-  return { summary: parsed.summary, sections }
+  return { summary: normalisedSummary, sections }
 }
 
 // ── Main orchestration ─────────────────────────────────────────────────────────
