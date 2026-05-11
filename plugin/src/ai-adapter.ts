@@ -515,6 +515,7 @@ export async function enrichBlock(
     const raw = await fetchGeminiCLI(fullPrompt, shouldGround)
     const result = parseEnrichResult(raw)
     if (!result) throw new Error("Could not parse Gemini CLI enrichment response")
+    console.log(`[Nodepad/GeminiCLI] Enrich done (${effectiveType})`)
     return result
   }
 
@@ -527,6 +528,7 @@ export async function enrichBlock(
     }
 
     const base = getOllamaBaseUrl(plugin)
+    console.log(`[Nodepad/Ollama] Enriching with ${model}${shouldGround ? " + RAG" : ""}`)
     const response = await requestUrl({
       url: `${base}/api/chat`,
       method: "POST",
@@ -548,10 +550,12 @@ export async function enrichBlock(
     if (!content) throw new Error("No content in Ollama response")
     const result = parseEnrichResult(content)
     if (!result) throw new Error("Could not parse Ollama enrichment response")
+    console.log(`[Nodepad/Ollama] Enrich done → ${result.contentType} (confidence ${result.confidence})`)
     return result
   }
 
   // ── Standard OpenAI-compatible providers (OpenRouter, OpenAI, Z.ai) ──────────
+  console.log(`[Nodepad/${config.provider}] Enriching with ${model}${shouldGround ? " + grounding" : ""}`)
   const response = await requestUrl({
     url: `${getBaseUrl(config)}/chat/completions`,
     method: "POST",
@@ -583,6 +587,7 @@ export async function enrichBlock(
 
   const result = parseEnrichResult(content)
   if (!result) throw new Error("Could not parse AI enrichment response")
+  console.log(`[Nodepad/${config.provider}] Enrich done → ${result.contentType} (confidence ${result.confidence})`)
   return result
 }
 
@@ -628,10 +633,13 @@ Return ONLY valid JSON:
 
   // ── Gemini CLI ───────────────────────────────────────────────────────────────
   if (config.provider === "geminicli") {
+    console.log("[Nodepad/GeminiCLI] Generating ghost synthesis...")
     const raw = await fetchGeminiCLI(prompt, false, 120000)
     const candidate = extractJsonCandidate(raw) ?? raw.trim()
     try {
-      return JSON.parse(candidate) as GhostResult
+      const result = JSON.parse(candidate) as GhostResult
+      console.log(`[Nodepad/GeminiCLI] Ghost done → "${result.text.slice(0, 60)}…"`)
+      return result
     } catch {
       const textMatch = raw.match(/"text"\s*:\s*"(.*?)"/)
       const catMatch  = raw.match(/"category"\s*:\s*"(.*?)"/)
@@ -643,6 +651,7 @@ Return ONLY valid JSON:
   // ── Ollama ───────────────────────────────────────────────────────────────────
   if (config.provider === "ollama") {
     const base = getOllamaBaseUrl(plugin)
+    console.log(`[Nodepad/Ollama] Generating ghost synthesis with ${model}`)
     const response = await requestUrl({
       url: `${base}/api/chat`,
       method: "POST",
@@ -661,7 +670,9 @@ Return ONLY valid JSON:
     if (!raw) throw new Error("No content in Ollama ghost response")
     const candidate = extractJsonCandidate(raw) ?? raw.trim()
     try {
-      return JSON.parse(candidate) as GhostResult
+      const result = JSON.parse(candidate) as GhostResult
+      console.log(`[Nodepad/Ollama] Ghost done → "${result.text.slice(0, 60)}…"`)
+      return result
     } catch {
       const textMatch = raw.match(/"text"\s*:\s*"(.*?)"/)
       const catMatch  = raw.match(/"category"\s*:\s*"(.*?)"/)
@@ -671,6 +682,7 @@ Return ONLY valid JSON:
   }
 
   // ── Standard providers ────────────────────────────────────────────────────────
+  console.log(`[Nodepad/${config.provider}] Generating ghost synthesis with ${model}`)
   const response = await requestUrl({
     url: `${getBaseUrl(config)}/chat/completions`,
     method: "POST",
@@ -693,7 +705,9 @@ Return ONLY valid JSON:
 
   const candidate = extractJsonCandidate(raw) ?? raw.trim()
   try {
-    return JSON.parse(candidate) as GhostResult
+    const result = JSON.parse(candidate) as GhostResult
+    console.log(`[Nodepad/${config.provider}] Ghost done → "${result.text.slice(0, 60)}…"`)
+    return result
   } catch {
     const textMatch = raw.match(/"text"\s*:\s*"(.*?)"/)
     const catMatch  = raw.match(/"category"\s*:\s*"(.*?)"/)
