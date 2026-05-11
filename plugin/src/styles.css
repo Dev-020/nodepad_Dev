@@ -65,18 +65,23 @@
   color: var(--text-normal);
 }
 
-/* Obsidian's .view-content svg rule overrides Tailwind size utilities */
-.nodepad-view svg:is(.h-2\.5, .w-2\.5) { width: 0.625rem; height: 0.625rem; }
-.nodepad-view svg:is(.h-3,    .w-3)    { width: 0.75rem;  height: 0.75rem;  }
-.nodepad-view svg:is(.h-3\.5, .w-3\.5) { width: 0.875rem; height: 0.875rem; }
-.nodepad-view svg:is(.h-4,    .w-4)    { width: 1rem;     height: 1rem;     }
-.nodepad-view svg:is(.h-5,    .w-5)    { width: 1.25rem;  height: 1.25rem;  }
-.nodepad-view svg:is(.h-6,    .w-6)    { width: 1.5rem;   height: 1.5rem;   }
-.nodepad-view svg:is(.h-\[18px\], .w-\[18px\]) { width: 18px; height: 18px; }
-.nodepad-view svg:is([class*="h-"], [class*="w-"]) {
+/* Obsidian's .view-content svg rule wins on specificity — use !important to enforce icon sizes */
+.nodepad-view svg {
+  display: inline-block !important;
+  flex-shrink: 0 !important;
   overflow: visible;
-  display: inline-block;
-  flex-shrink: 0;
+}
+.nodepad-view svg:is(.h-2\.5, .w-2\.5) { width: 0.625rem !important; height: 0.625rem !important; }
+.nodepad-view svg:is(.h-3,    .w-3)    { width: 0.75rem  !important; height: 0.75rem  !important; }
+.nodepad-view svg:is(.h-3\.5, .w-3\.5) { width: 0.875rem !important; height: 0.875rem !important; }
+.nodepad-view svg:is(.h-4,    .w-4)    { width: 1rem     !important; height: 1rem     !important; }
+.nodepad-view svg:is(.h-5,    .w-5)    { width: 1.25rem  !important; height: 1.25rem  !important; }
+.nodepad-view svg:is(.h-6,    .w-6)    { width: 1.5rem   !important; height: 1.5rem   !important; }
+.nodepad-view svg:is(.h-\[18px\], .w-\[18px\]) { width: 18px !important; height: 18px !important; }
+/* Prevent any unsized SVG from growing beyond a sensible default */
+.nodepad-view svg:not([class*="h-"]):not([class*="w-"]) {
+  max-width: 1.25rem;
+  max-height: 1.25rem;
 }
 
 /* Obsidian's .view-content button/input rules override Tailwind padding utilities */
