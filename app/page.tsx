@@ -19,6 +19,8 @@ import { generateGhostClient } from "@/lib/ai-ghost"
 import { exportToMarkdown, downloadMarkdown, copyToClipboard } from "@/lib/export"
 import { downloadNodepadFile, parseNodepadFile, NodepadParseError } from "@/lib/nodepad-format"
 import { detectContentType } from "@/lib/detect-content-type"
+import { generateSynthesisDocument } from "@/lib/synthesis"
+import { renderSynthesisDocument, slugifySynthesis } from "@/lib/synthesis-export"
 
 function generateId() {
   return Math.random().toString(36).substring(2, 10)
@@ -58,6 +60,7 @@ export default function Page() {
   // ── Undo history ring (max 20 block snapshots per project) ───────────────
   const blockHistoryRef = useRef<Record<string, TextBlock[][]>>({})
   const [undoToast, setUndoToast] = useState<string | null>(null)
+  const [synthesisStatus, setSynthesisStatus] = useState<string | null>(null)
   const undoToastTimer = useRef<NodeJS.Timeout | null>(null)
 
   const pushHistory = useCallback((projectId: string, currentBlocks: TextBlock[]) => {
@@ -878,8 +881,34 @@ export default function Page() {
         }
         return prev
       })
+    } else if (cmd === "synthesis-doc") {
+      // Capture current project snapshot synchronously, then run async pipeline
+      let blocks: TextBlock[] | null = null
+      let projName = ""
+      setProjects(prev => {
+        const proj = prev.find(p => p.id === activeProjectId)
+        if (proj) { blocks = proj.blocks; projName = proj.name }
+        return prev
+      })
+      if (blocks) {
+        const captured = blocks as TextBlock[]
+        const name     = projName
+        setSynthesisStatus("Building note graph…")
+        generateSynthesisDocument(captured, setSynthesisStatus)
+          .then(({ outline, decontextualized, clusters }) => {
+            const md   = renderSynthesisDocument(name, outline, decontextualized, clusters)
+            const slug = slugifySynthesis(name)
+            downloadMarkdown(`${slug}-synthesis.md`, md)
+            setSynthesisStatus(null)
+          })
+          .catch((err: Error) => {
+            console.error("[synthesis]", err)
+            setSynthesisStatus(`Error: ${err.message}`)
+            setTimeout(() => setSynthesisStatus(null), 5000)
+          })
+      }
     }
-    
+
     // Handle type overrides
     else if (cmd === "task" && text) addBlock(text, "task")
     else if (cmd === "thesis" && text) addBlock(text, "thesis")
@@ -1027,6 +1056,30 @@ export default function Page() {
             onDismiss={dismissGhostNote}
           />
         </div>
+
+        {/* Synthesis status toast */}
+        <AnimatePresence>
+          {synthesisStatus && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+              className="absolute bottom-[104px] left-1/2 -translate-x-1/2 z-[130] pointer-events-none"
+            >
+              <div className="px-3 py-1.5 rounded-sm bg-black/90 border border-white/15 backdrop-blur-md shadow-xl flex items-center gap-2">
+                {!synthesisStatus.startsWith("Error") && (
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+                    className="h-2.5 w-2.5 rounded-full border border-white/40 border-t-white/80"
+                  />
+                )}
+                <span className="font-mono text-[10px] text-white/70 tracking-tight whitespace-nowrap">{synthesisStatus}</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Undo toast */}
         <AnimatePresence>
