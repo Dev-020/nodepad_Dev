@@ -189,6 +189,13 @@ export function SynthesisProgressPanel({
   const totalCount = calls.length
   const hasError   = calls.some(c => c.status === "error")
 
+  const [dismissed, setDismissed] = React.useState(false)
+
+  // Reset dismissed state when a new synthesis starts
+  React.useEffect(() => {
+    if (isActive) setDismissed(false)
+  }, [isActive])
+
   const pillLabel = hasError
     ? "Synthesis error — click for details"
     : isActive
@@ -197,35 +204,49 @@ export function SynthesisProgressPanel({
         : "Synthesising…"
       : `Synthesis done — ${totalStartMs ? formatDuration(now - totalStartMs) : ""}`
 
-  const showPill = calls.length > 0
+  const showPill = calls.length > 0 && !dismissed
 
   return (
     <>
       {/* Bottom pill */}
       <AnimatePresence>
         {showPill && (
-          <motion.button
+          <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}
             transition={{ duration: 0.15, ease: "easeOut" }}
-            onClick={onPillClick}
-            className="absolute bottom-[104px] left-1/2 -translate-x-1/2 z-[130] flex items-center gap-2 px-3 py-1.5 rounded-sm bg-black/90 border border-white/15 backdrop-blur-md shadow-xl hover:border-white/25 transition-colors group"
+            className="absolute bottom-[104px] left-1/2 -translate-x-1/2 z-[130] flex items-center gap-1 bg-black/90 border border-white/15 backdrop-blur-md shadow-xl rounded-sm"
           >
-            {isActive && !hasError && (
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
-                className="h-2.5 w-2.5 rounded-full border border-white/30 border-t-white/80 shrink-0"
-              />
+            <button
+              onClick={onPillClick}
+              className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.04] transition-colors group rounded-l-sm"
+            >
+              {isActive && !hasError && (
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+                  className="h-2.5 w-2.5 rounded-full border border-white/30 border-t-white/80 shrink-0"
+                />
+              )}
+              {hasError && <AlertCircle className="h-2.5 w-2.5 text-red-400/80 shrink-0" />}
+              {!isActive && !hasError && <CheckCircle className="h-2.5 w-2.5 text-emerald-400/70 shrink-0" />}
+              <span className="font-mono text-[10px] text-white/70 tracking-tight whitespace-nowrap">
+                {pillLabel}
+              </span>
+              <ChevronUp className="h-2.5 w-2.5 text-white/30 group-hover:text-white/55 transition-colors" />
+            </button>
+            {/* Dismiss — only shown when not active */}
+            {!isActive && (
+              <button
+                onClick={() => setDismissed(true)}
+                className="px-1.5 py-1.5 text-white/25 hover:text-white/55 hover:bg-white/[0.04] transition-colors rounded-r-sm border-l border-white/8"
+                aria-label="Dismiss"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
             )}
-            {hasError && <AlertCircle className="h-2.5 w-2.5 text-red-400/80 shrink-0" />}
-            {!isActive && !hasError && <CheckCircle className="h-2.5 w-2.5 text-emerald-400/70 shrink-0" />}
-            <span className="font-mono text-[10px] text-white/70 tracking-tight whitespace-nowrap">
-              {pillLabel}
-            </span>
-            <ChevronUp className="h-2.5 w-2.5 text-white/30 group-hover:text-white/55 transition-colors" />
-          </motion.button>
+          </motion.div>
         )}
       </AnimatePresence>
 
