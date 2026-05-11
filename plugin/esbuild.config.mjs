@@ -51,10 +51,8 @@ const context = await esbuild.context({
 if (prod) {
   await context.rebuild()
   fs.copyFileSync("manifest.json", "dist/manifest.json")
-  fs.copyFileSync("src/styles.css", "dist/styles.css")
   process.exit(0)
 } else {
   fs.copyFileSync("manifest.json", "dist/manifest.json")
-  fs.copyFileSync("src/styles.css", "dist/styles.css")
   await context.watch()
 }
