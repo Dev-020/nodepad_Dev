@@ -43,7 +43,7 @@ export interface GhostResult {
 
 // ── Config builder ────────────────────────────────────────────────────────────
 
-const GROUNDING_PROVIDERS = new Set<AIProvider>(["openrouter", "openai", "geminicli"])
+const GROUNDING_PROVIDERS = new Set<AIProvider>(["openrouter", "openai", "ollama", "geminicli"])
 
 export function getPluginAIConfig(plugin: NodepadPlugin): AIConfig | null {
   const { settings } = plugin
@@ -345,6 +345,78 @@ async function fetchGeminiCLI(
   return result.content
 }
 
+// ── Ollama RAG (hybrid web search + local embeddings) ────────────────────────
+
+function chunkText(text: string, chunkSize = 300): string[] {
+  const chunks: string[] = []
+  for (let i = 0; i < text.length; i += chunkSize) chunks.push(text.slice(i, i + chunkSize))
+  return chunks
+}
+
+function cosineSimilarity(v1: number[], v2: number[]): number {
+  let dot = 0, normA = 0, normB = 0
+  for (let i = 0; i < v1.length; i++) {
+    dot += v1[i] * v2[i]; normA += v1[i] * v1[i]; normB += v2[i] * v2[i]
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB))
+}
+
+async function getLocalEmbeddings(input: string | string[]): Promise<number[][]> {
+  try {
+    const res = await requestUrl({
+      url: "http://localhost:11434/api/embed",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "embeddinggemma", input }),
+      throw: false,
+    })
+    if (res.status >= 400) return []
+    return (res.json as { embeddings?: number[][] }).embeddings ?? []
+  } catch {
+    return []
+  }
+}
+
+async function ollamaRAGContext(query: string, apiKey: string): Promise<string> {
+  console.log("[Nodepad/Ollama] RAG: searching web...")
+  const searchRes = await requestUrl({
+    url: "https://ollama.com/api/web_search",
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+    body: JSON.stringify({ query, max_results: 5 }),
+    throw: false,
+  })
+  if (searchRes.status >= 400) {
+    console.log(`[Nodepad/Ollama] RAG: search failed (${searchRes.status})`)
+    return ""
+  }
+  const { results } = searchRes.json as { results?: { title: string; content: string }[] }
+  if (!results?.length) return ""
+  console.log(`[Nodepad/Ollama] RAG: found ${results.length} results, vectorizing...`)
+
+  const allChunks: string[] = []
+  for (const r of results) allChunks.push(...chunkText(`[${r.title}] ${r.content.slice(0, 4000)}`, 300))
+  if (!allChunks.length) return ""
+
+  const [queryEmbs, chunkEmbs] = await Promise.all([
+    getLocalEmbeddings(query),
+    getLocalEmbeddings(allChunks),
+  ])
+  if (!queryEmbs[0] || !chunkEmbs.length) {
+    console.log("[Nodepad/Ollama] RAG: local embeddings failed — is embeddinggemma installed?")
+    return ""
+  }
+
+  const topChunks = allChunks
+    .map((text, i) => ({ text, score: chunkEmbs[i] ? cosineSimilarity(queryEmbs[0], chunkEmbs[i]) : 0 }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map(c => c.text)
+
+  console.log(`[Nodepad/Ollama] RAG: injecting ${topChunks.length} snippets`)
+  return `[RAG Filtered Results (Top 5 matches from Web Search)]:\n${topChunks.join("\n\n[...]\n\n")}`
+}
+
 // ── Ollama request helper ─────────────────────────────────────────────────────
 
 function getOllamaBaseUrl(plugin: NodepadPlugin): string {
@@ -446,6 +518,12 @@ export async function enrichBlock(
 
   // ── Ollama ───────────────────────────────────────────────────────────────────
   if (config.provider === "ollama") {
+    let ollamaUserMessage = userMessage
+    if (shouldGround) {
+      const ragContext = await ollamaRAGContext(text, config.apiKey)
+      if (ragContext) ollamaUserMessage = `${ragContext}\n\n---\n\n${userMessage}`
+    }
+
     const base = getOllamaBaseUrl(plugin)
     const response = await requestUrl({
       url: `${base}/api/chat`,
@@ -455,7 +533,7 @@ export async function enrichBlock(
         model,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user",   content: userMessage },
+          { role: "user",   content: ollamaUserMessage },
         ],
         stream: false,
         options: { temperature: 0 },

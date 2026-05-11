@@ -25,7 +25,7 @@ export const DEFAULT_SETTINGS: NodepadSettings = {
 }
 
 // Providers that have an actual web-search mechanism in the adapter
-const GROUNDING_PROVIDERS = new Set<AIProvider>(["openrouter", "openai", "geminicli"])
+const GROUNDING_PROVIDERS = new Set<AIProvider>(["openrouter", "openai", "ollama", "geminicli"])
 
 export class NodepadSettingTab extends PluginSettingTab {
   plugin: NodepadPlugin
@@ -272,6 +272,7 @@ export class NodepadSettingTab extends PluginSettingTab {
       const groundingDesc: Record<string, string> = {
         openrouter: "Appends :online to the model ID so the provider fetches live sources for claims, questions, and references.",
         openai: "Switches to a search-preview model for claim, question, and reference notes.",
+        ollama: "Hybrid RAG: searches the web via Ollama Cloud, vectorizes results locally with embeddinggemma, and injects the top 5 ranked snippets as context. Requires an Ollama Cloud API key and embeddinggemma installed locally (ollama pull embeddinggemma).",
         geminicli: "Runs a two-stage pipeline: Stage 1 performs autonomous web research, Stage 2 enriches using the research as verified context.",
       }
       new Setting(containerEl)
