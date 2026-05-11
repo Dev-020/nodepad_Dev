@@ -386,13 +386,25 @@ export async function callSynthesizeCluster(
   const raw = await callAI(config, targetUrl, payload)
 
   try {
-    const parsed = JSON.parse(extractJson(raw)) as RawClusterResult
+    const jsonStr = extractJson(raw)
+
+    let obj: RawClusterResult
+    try {
+      obj = JSON.parse(jsonStr)
+    } catch {
+      // LaTeX backslash fix: LLMs often emit \mathbb, \frac etc. as single backslashes
+      // inside JSON strings, which are invalid escape sequences. Escape any \ not already
+      // part of a valid JSON escape sequence and retry once.
+      const fixed = jsonStr.replace(/\\(?!["\\/bfnrtu])/g, "\\\\")
+      obj = JSON.parse(fixed)
+    }
+
     return {
-      heading:          parsed.heading          ?? targetCluster.sectionName,
-      intro:            parsed.intro            ?? "",
-      sectionSynthesis: parsed.sectionSynthesis ?? "",
-      expandingPrompts: Array.isArray(parsed.expandingPrompts) ? parsed.expandingPrompts : [],
-      gaps:             Array.isArray(parsed.gaps)             ? parsed.gaps             : [],
+      heading:          obj.heading          ?? targetCluster.sectionName,
+      intro:            obj.intro            ?? "",
+      sectionSynthesis: obj.sectionSynthesis ?? "",
+      expandingPrompts: Array.isArray(obj.expandingPrompts) ? obj.expandingPrompts : [],
+      gaps:             Array.isArray(obj.gaps)             ? obj.gaps             : [],
     }
   } catch {
     const safeLabel = targetCluster.sectionName.replace(/\s+/g, "-").replace(/[^a-z0-9-]/gi, "")
