@@ -43,13 +43,15 @@ export interface GhostResult {
 
 // ── Config builder ────────────────────────────────────────────────────────────
 
+const GROUNDING_PROVIDERS = new Set<AIProvider>(["openrouter", "openai", "geminicli"])
+
 export function getPluginAIConfig(plugin: NodepadPlugin): AIConfig | null {
   const { settings } = plugin
   if (!settings.apiKey && settings.provider !== "geminicli") return null
   return {
     apiKey: settings.apiKey || "local-cli",
     modelId: settings.modelId || "openai/gpt-4o",
-    supportsGrounding: false,
+    supportsGrounding: settings.webGrounding && GROUNDING_PROVIDERS.has(settings.provider as AIProvider),
     provider: settings.provider as AIProvider,
     customBaseUrl: settings.customBaseUrl,
   }
@@ -365,7 +367,7 @@ export async function enrichBlock(
 
   const detectedType = detectContentType(text)
   const effectiveType = forcedType || detectedType
-  const shouldGround = TRUTH_DEPENDENT_TYPES.has(effectiveType)
+  const shouldGround = config.supportsGrounding && TRUTH_DEPENDENT_TYPES.has(effectiveType)
 
   let model = config.modelId
   let webSearchOptions: Record<string, unknown> | undefined

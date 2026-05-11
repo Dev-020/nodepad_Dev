@@ -9,6 +9,8 @@ export interface NodepadSettings {
   modelId: string
   customBaseUrl: string
   useLocalOllama: boolean
+  ollamaModels: string[]
+  webGrounding: boolean
 }
 
 export const DEFAULT_SETTINGS: NodepadSettings = {
@@ -18,7 +20,12 @@ export const DEFAULT_SETTINGS: NodepadSettings = {
   modelId: "openai/gpt-4o",
   customBaseUrl: "",
   useLocalOllama: true,
+  ollamaModels: [],
+  webGrounding: false,
 }
+
+// Providers that have an actual web-search mechanism in the adapter
+const GROUNDING_PROVIDERS = new Set<AIProvider>(["openrouter", "openai", "geminicli"])
 
 export class NodepadSettingTab extends PluginSettingTab {
   plugin: NodepadPlugin
@@ -26,6 +33,17 @@ export class NodepadSettingTab extends PluginSettingTab {
   constructor(app: App, plugin: NodepadPlugin) {
     super(app, plugin)
     this.plugin = plugin
+  }
+
+  async fetchOllamaModels(): Promise<string[]> {
+    try {
+      const res = await fetch("http://localhost:11434/api/tags")
+      if (!res.ok) return []
+      const data = await res.json() as { models: { name: string }[] }
+      return data.models.map(m => m.name)
+    } catch {
+      return []
+    }
   }
 
   display() {
@@ -45,19 +63,27 @@ export class NodepadSettingTab extends PluginSettingTab {
           const newProvider = value as AIProvider
           const previousProvider = this.plugin.settings.provider
 
-          // Save the current key under the provider we're leaving
+          // Save current key under the provider we're leaving
           this.plugin.settings.providerKeys = {
             ...this.plugin.settings.providerKeys,
             [previousProvider]: this.plugin.settings.apiKey,
           }
 
-          // Switch provider and restore the key we saved for the new one
           this.plugin.settings.provider = newProvider
           this.plugin.settings.apiKey = this.plugin.settings.providerKeys[newProvider] ?? ""
 
-          // Reset model to the first available for the new provider
+          // Reset model to first available for the new provider
           const models = getModelsForProvider(newProvider)
           if (models.length > 0) this.plugin.settings.modelId = models[0].id
+
+          // Auto-discover Ollama models when switching to Ollama
+          if (newProvider === "ollama") {
+            const found = await this.fetchOllamaModels()
+            this.plugin.settings.ollamaModels = found
+            if (found.length > 0 && !found.includes(this.plugin.settings.modelId)) {
+              this.plugin.settings.modelId = found[0]
+            }
+          }
 
           await this.plugin.saveSettings()
           this.display()
@@ -85,7 +111,6 @@ export class NodepadSettingTab extends PluginSettingTab {
             .setValue(this.plugin.settings.apiKey)
             .onChange(async (value) => {
               this.plugin.settings.apiKey = value
-              // Keep providerKeys in sync so switching away preserves the latest value
               this.plugin.settings.providerKeys = {
                 ...this.plugin.settings.providerKeys,
                 [provider]: value,
@@ -133,7 +158,7 @@ export class NodepadSettingTab extends PluginSettingTab {
         })
     }
 
-    // ── Ollama: local vs cloud toggle ─────────────────────────────────────────
+    // ── Ollama: local vs cloud toggle + model discovery ───────────────────────
 
     if (provider === "ollama") {
       new Setting(containerEl)
@@ -150,18 +175,29 @@ export class NodepadSettingTab extends PluginSettingTab {
         })
 
       if (this.plugin.settings.useLocalOllama) {
+        const discoveredCount = this.plugin.settings.ollamaModels.length
         new Setting(containerEl)
           .setName("Local Ollama models")
-          .setDesc("Fetches available models from localhost:11434.")
+          .setDesc(discoveredCount > 0
+            ? `${discoveredCount} model${discoveredCount > 1 ? "s" : ""} discovered. Click to refresh.`
+            : "Click to fetch available models from localhost:11434.")
           .addButton((btn) => {
             btn.setButtonText("Discover models").onClick(async () => {
-              try {
-                const res = await fetch("http://localhost:11434/api/tags")
-                const data = await res.json() as { models: { name: string }[] }
-                const names = data.models.map(m => m.name).join(", ")
-                new Notice(`Found: ${names || "none"}`)
-              } catch {
-                new Notice("Local Ollama not running or unreachable.")
+              btn.setButtonText("Discovering…")
+              btn.setDisabled(true)
+              const found = await this.fetchOllamaModels()
+              if (found.length > 0) {
+                this.plugin.settings.ollamaModels = found
+                if (!found.includes(this.plugin.settings.modelId)) {
+                  this.plugin.settings.modelId = found[0]
+                }
+                await this.plugin.saveSettings()
+                new Notice(`Found ${found.length} model${found.length > 1 ? "s" : ""}: ${found.slice(0, 3).join(", ")}${found.length > 3 ? "…" : ""}`)
+                this.display()
+              } else {
+                new Notice("Local Ollama not running or no models installed.")
+                btn.setButtonText("Discover models")
+                btn.setDisabled(false)
               }
             })
           })
@@ -171,34 +207,84 @@ export class NodepadSettingTab extends PluginSettingTab {
     // ── Model ID ──────────────────────────────────────────────────────────────
 
     if (provider !== "geminicli") {
-      const staticModels = getModelsForProvider(provider)
-
-      if (staticModels.length > 0) {
-        new Setting(containerEl)
-          .setName("Model")
-          .setDesc("Model to use for AI enrichment.")
-          .addDropdown((drop) => {
-            staticModels.forEach(m => drop.addOption(m.id, m.label))
-            drop.setValue(this.plugin.settings.modelId)
-            drop.onChange(async (value) => {
-              this.plugin.settings.modelId = value
-              await this.plugin.saveSettings()
-            })
-          })
-      } else {
-        new Setting(containerEl)
-          .setName("Model ID")
-          .setDesc("e.g. llama3.2, hf.co/org/model for Ollama Cloud.")
-          .addText((text) =>
-            text
-              .setPlaceholder("model-name")
-              .setValue(this.plugin.settings.modelId)
-              .onChange(async (value) => {
+      if (provider === "ollama") {
+        const discovered = this.plugin.settings.ollamaModels
+        if (discovered.length > 0) {
+          new Setting(containerEl)
+            .setName("Model")
+            .setDesc("Locally installed Ollama model.")
+            .addDropdown((drop) => {
+              discovered.forEach(m => drop.addOption(m, m))
+              drop.setValue(this.plugin.settings.modelId)
+              drop.onChange(async (value) => {
                 this.plugin.settings.modelId = value
                 await this.plugin.saveSettings()
               })
-          )
+            })
+        } else {
+          new Setting(containerEl)
+            .setName("Model ID")
+            .setDesc("Enter a model name, or click Discover models above.")
+            .addText((text) =>
+              text
+                .setPlaceholder("llama3.2")
+                .setValue(this.plugin.settings.modelId)
+                .onChange(async (value) => {
+                  this.plugin.settings.modelId = value
+                  await this.plugin.saveSettings()
+                })
+            )
+        }
+      } else {
+        const staticModels = getModelsForProvider(provider)
+        if (staticModels.length > 0) {
+          new Setting(containerEl)
+            .setName("Model")
+            .setDesc("Model to use for AI enrichment.")
+            .addDropdown((drop) => {
+              staticModels.forEach(m => drop.addOption(m.id, m.label))
+              drop.setValue(this.plugin.settings.modelId)
+              drop.onChange(async (value) => {
+                this.plugin.settings.modelId = value
+                await this.plugin.saveSettings()
+              })
+            })
+        } else {
+          new Setting(containerEl)
+            .setName("Model ID")
+            .setDesc("e.g. hf.co/org/model for Ollama Cloud.")
+            .addText((text) =>
+              text
+                .setPlaceholder("model-name")
+                .setValue(this.plugin.settings.modelId)
+                .onChange(async (value) => {
+                  this.plugin.settings.modelId = value
+                  await this.plugin.saveSettings()
+                })
+            )
+        }
       }
+    }
+
+    // ── Web grounding ─────────────────────────────────────────────────────────
+
+    if (GROUNDING_PROVIDERS.has(provider)) {
+      const groundingDesc: Record<string, string> = {
+        openrouter: "Appends :online to the model ID so the provider fetches live sources for claims, questions, and references.",
+        openai: "Switches to a search-preview model for claim, question, and reference notes.",
+        geminicli: "Runs a two-stage pipeline: Stage 1 performs autonomous web research, Stage 2 enriches using the research as verified context.",
+      }
+      new Setting(containerEl)
+        .setName("Web grounding")
+        .setDesc(groundingDesc[provider] ?? "Enables live web search during enrichment.")
+        .addToggle((toggle) => {
+          toggle
+            .setValue(this.plugin.settings.webGrounding)
+            .onChange(async (value) => {
+              this.plugin.settings.webGrounding = value
+              await this.plugin.saveSettings()
+            })
+        })
     }
 
     // ── Custom base URL (advanced) ────────────────────────────────────────────
