@@ -10,12 +10,12 @@ import {
 import { Command } from "cmdk"
 import { useModKey } from "@/lib/utils"
 
-const ACTION_ITEMS = [
-  { id: "export-nodepad", icon: FolderDown,  label: "Export",  sub: ".nodepad"  },
-  { id: "import-nodepad", icon: FolderInput, label: "Import",  sub: ".nodepad"  },
-  { id: "export-md",      icon: Download,    label: "Export",  sub: "markdown"  },
-  { id: "copy-md",        icon: Clipboard,   label: "Copy",    sub: "markdown"  },
-  { id: "clear",          icon: Trash2,      label: "Clear",   sub: "canvas"    },
+const ALL_ACTION_ITEMS = [
+  { id: "export-nodepad", icon: FolderDown,  label: "Export",  sub: ".nodepad", pluginOnly: false },
+  { id: "import-nodepad", icon: FolderInput, label: "Import",  sub: ".nodepad", pluginOnly: false },
+  { id: "export-md",      icon: Download,    label: "Export",  sub: "markdown", pluginOnly: true  },
+  { id: "copy-md",        icon: Clipboard,   label: "Copy",    sub: "markdown", pluginOnly: true  },
+  { id: "clear",          icon: Trash2,      label: "Clear",   sub: "canvas",   pluginOnly: true  },
 ]
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -25,11 +25,12 @@ interface VimInputProps {
   onCommand: (cmd: string, text?: string) => void
   isCommandKOpen: boolean
   setIsCommandKOpen: (open: boolean) => void
+  isPlugin?: boolean
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpen }: VimInputProps) {
+export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpen, isPlugin }: VimInputProps) {
   const [value, setValue] = React.useState("")
   const [search, setSearch] = React.useState("")
   const [focusedIdx, setFocusedIdx] = React.useState(0)
@@ -48,11 +49,18 @@ export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpe
   ], [])
 
   const NAV_ITEMS = React.useMemo(() => [
-    { id: "open-projects",  icon: FolderOpen, label: "Projects",    sub: "" },
-    { id: "new-project",    icon: FolderPlus, label: "New Project", sub: "" },
-    { id: "open-index",     icon: BookOpen,   label: "Index",       sub: "" },
-    { id: "open-synthesis", icon: Sparkles,   label: "Synthesis",   sub: "" },
-  ], [])
+    ...(!isPlugin ? [
+      { id: "open-projects", icon: FolderOpen, label: "Projects",    sub: "" },
+      { id: "new-project",   icon: FolderPlus, label: "New Project", sub: "" },
+    ] : []),
+    { id: "open-index",     icon: BookOpen,  label: "Index",     sub: "" },
+    { id: "open-synthesis", icon: Sparkles,  label: "Synthesis", sub: "" },
+  ], [isPlugin])
+
+  const ACTION_ITEMS = React.useMemo(
+    () => ALL_ACTION_ITEMS.filter(i => isPlugin ? i.pluginOnly : true),
+    [isPlugin]
+  )
 
   // ── Filtered items ──────────────────────────────────────────────────────
 
@@ -67,13 +75,10 @@ export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpe
   const totalItems  = viewCount + navCount + actionCount
 
   // Section boundaries for keyboard nav
-  // Section 0: views   [0 .. viewCount)
-  // Section 1: nav     [viewCount .. viewCount+navCount)
-  // Section 2: actions [viewCount+navCount .. total)
   const sections = React.useMemo(() => [
     { start: 0,                    count: viewCount,   cols: 3 },
-    { start: viewCount,            count: navCount,    cols: 4 },
-    { start: viewCount + navCount, count: actionCount, cols: 5 },
+    { start: viewCount,            count: navCount,    cols: navCount },
+    { start: viewCount + navCount, count: actionCount, cols: actionCount },
   ], [viewCount, navCount, actionCount])
 
   const getSectionForIdx = React.useCallback((idx: number) => {
@@ -262,7 +267,7 @@ export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpe
                 {navItems.length > 0 && (
                   <div className="border-t border-white/10 pt-3">
                     <p className="px-1 pb-2 font-mono text-[8px] font-bold uppercase tracking-[0.2em] text-white/45">Navigate</p>
-                    <div className="grid grid-cols-4 gap-1.5">
+                    <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${navItems.length}, minmax(0, 1fr))` }}>
                       {navItems.map((item, i) => {
                         const idx     = viewCount + i
                         const focused = focusedIdx === idx
@@ -290,7 +295,7 @@ export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpe
                 {actionItems.length > 0 && (
                   <div className="border-t border-white/10 pt-3">
                     <p className="px-1 pb-2 font-mono text-[8px] font-bold uppercase tracking-[0.2em] text-white/45">Actions</p>
-                    <div className="grid grid-cols-5 gap-1.5">
+                    <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${actionItems.length}, minmax(0, 1fr))` }}>
                       {actionItems.map((item, i) => {
                         const idx     = viewCount + navCount + i
                         const focused = focusedIdx === idx

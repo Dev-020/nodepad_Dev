@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+@source "../../components/**/*.tsx";
+@source "../../app/**/*.tsx";
+@source "../src/**/*.tsx";
+
+/* ── Content-type accent colours ─────────────────────────────────────────────
+   Design constants — do not adapt to Obsidian theme colour. */
+:root,
+.theme-dark,
+.theme-light {
+  --type-entity:     oklch(0.65 0.12 250);
+  --type-claim:      oklch(0.75 0.15 80);
+  --type-question:   oklch(0.68 0.18 290);
+  --type-task:       oklch(0.72 0.14 195);
+  --type-idea:       oklch(0.72 0.22 340);
+  --type-reference:  oklch(0.65 0.15 230);
+  --type-quote:      oklch(0.72 0.19 155);
+  --type-definition: oklch(0.7  0.13 220);
+  --type-opinion:    oklch(0.7  0.18 340);
+  --type-reflection: oklch(0.65 0.2  300);
+  --type-narrative:  oklch(0.72 0.16 50);
+  --type-comparison: oklch(0.68 0.14 180);
+  --type-thesis:     oklch(0.86 0.19 88);
+  --type-general:    oklch(0.55 0.02 260);
+  --thesis-accent:   oklch(0.7  0.15 200);
+}
+
+/* ── Tailwind semantic tokens → Obsidian CSS variables ───────────────────── */
+@theme {
+  --color-background:            var(--background-primary);
+  --color-foreground:            var(--text-normal);
+  --color-card:                  var(--background-secondary-alt, var(--background-secondary));
+  --color-card-foreground:       var(--text-normal);
+  --color-primary:               var(--interactive-accent);
+  --color-primary-foreground:    var(--background-primary);
+  --color-secondary:             var(--background-secondary);
+  --color-secondary-foreground:  var(--text-normal);
+  --color-muted:                 var(--background-secondary);
+  --color-muted-foreground:      var(--text-muted);
+  --color-border:                var(--background-modifier-border);
+  --color-destructive:           oklch(0.577 0.245 27.325);
+  --color-ring:                  var(--interactive-accent);
+  --color-type-entity:           var(--type-entity);
+  --color-type-claim:            var(--type-claim);
+  --color-type-question:         var(--type-question);
+  --color-type-task:             var(--type-task);
+  --color-type-idea:             var(--type-idea);
+  --color-type-reference:        var(--type-reference);
+  --color-type-quote:            var(--type-quote);
+  --color-type-definition:       var(--type-definition);
+  --color-type-opinion:          var(--type-opinion);
+  --color-type-reflection:       var(--type-reflection);
+  --color-type-narrative:        var(--type-narrative);
+  --color-type-comparison:       var(--type-comparison);
+  --color-type-thesis:           var(--type-thesis);
+  --color-type-general:          var(--type-general);
+  --color-thesis-accent:         var(--thesis-accent);
+}
+
+.nodepad-view {
+  height: 100%;
+  overflow: hidden;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+/* Obsidian's .view-content svg rule wins on specificity — use !important to enforce icon sizes */
+.nodepad-view svg {
+  display: inline-block !important;
+  flex-shrink: 0 !important;
+  overflow: visible;
+}
+.nodepad-view svg:is(.h-2\.5, .w-2\.5) { width: 0.625rem !important; height: 0.625rem !important; }
+.nodepad-view svg:is(.h-3,    .w-3)    { width: 0.75rem  !important; height: 0.75rem  !important; }
+.nodepad-view svg:is(.h-3\.5, .w-3\.5) { width: 0.875rem !important; height: 0.875rem !important; }
+.nodepad-view svg:is(.h-4,    .w-4)    { width: 1rem     !important; height: 1rem     !important; }
+.nodepad-view svg:is(.h-5,    .w-5)    { width: 1.25rem  !important; height: 1.25rem  !important; }
+.nodepad-view svg:is(.h-6,    .w-6)    { width: 1.5rem   !important; height: 1.5rem   !important; }
+.nodepad-view svg:is(.h-\[18px\], .w-\[18px\]) { width: 18px !important; height: 18px !important; }
+/* Prevent any unsized SVG from growing beyond a sensible default */
+.nodepad-view svg:not([class*="h-"]):not([class*="w-"]) {
+  max-width: 1.25rem;
+  max-height: 1.25rem;
+}
+
+/* Obsidian's .view-content button rule zeroes padding — !important needed to restore Tailwind values */
+.nodepad-view button:is(.p-1)     { padding: 0.25rem  !important; }
+.nodepad-view button:is(.p-1\.5)  { padding: 0.375rem !important; }
+.nodepad-view button:is(.p-2)     { padding: 0.5rem   !important; }
+.nodepad-view button:is(.p-3)     { padding: 0.75rem  !important; }
+.nodepad-view button:is(.py-1)    { padding-top: 0.25rem   !important; padding-bottom: 0.25rem   !important; }
+.nodepad-view button:is(.py-1\.5) { padding-top: 0.375rem  !important; padding-bottom: 0.375rem  !important; }
+.nodepad-view button:is(.py-2)    { padding-top: 0.5rem    !important; padding-bottom: 0.5rem    !important; }
+.nodepad-view button:is(.py-3)    { padding-top: 0.75rem   !important; padding-bottom: 0.75rem   !important; }
+.nodepad-view button:is(.py-4)    { padding-top: 1.8rem    !important; padding-bottom: 1.6rem    !important; }
+.nodepad-view button:is(.px-1)    { padding-left: 0.25rem  !important; padding-right: 0.25rem   !important; }
+.nodepad-view button:is(.px-1\.5) { padding-left: 0.375rem !important; padding-right: 0.375rem  !important; }
+.nodepad-view button:is(.px-2)    { padding-left: 0.5rem   !important; padding-right: 0.5rem    !important; }
+.nodepad-view button:is(.px-3)    { padding-left: 0.75rem  !important; padding-right: 0.75rem   !important; }
+.nodepad-view button:is(.px-4)    { padding-left: 1rem     !important; padding-right: 1rem      !important; }
+.nodepad-view button:is(.px-5)    { padding-left: 1.25rem  !important; padding-right: 1.25rem   !important; }
+.nodepad-view button:is(.h-full)  { height: 100% !important; }

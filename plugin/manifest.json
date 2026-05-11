@@ -1,0 +1,10 @@
+{
+  "id": "nodepad",
+  "name": "Nodepad",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "A spatial research tool where AI augments your thinking. Each .nodepad file is an independent canvas with tiling, kanban, and graph views.",
+  "author": "Dev-020",
+  "authorUrl": "https://github.com/Dev-020/nodepad_Dev",
+  "isDesktopOnly": true
+}
