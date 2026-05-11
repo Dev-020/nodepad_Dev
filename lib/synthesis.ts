@@ -348,23 +348,35 @@ export async function callSynthesize(
     throw new Error("Synthesis: AI returned non-JSON. Raw response saved to synthesis-call-c-raw.txt")
   }
 
-  // Normalise: some models wrap the output under a top-level key
-  const root = (parsed as Record<string, unknown>)
-  const normalisedSections =
-    Array.isArray(root.sections)     ? root.sections as Omit<SynthesisSection, "nodeIds">[] :
-    Array.isArray(root.data)         ? root.data as Omit<SynthesisSection, "nodeIds">[] :
-    Array.isArray(root.synthesis)    ? root.synthesis as Omit<SynthesisSection, "nodeIds">[] :
-    null
+  // Normalise: handle both array-at-root and object shapes
+  type RawSection = Omit<SynthesisSection, "nodeIds">
+  type RootObj    = Record<string, unknown>
 
-  const normalisedSummary =
-    typeof root.summary === "string"  ? root.summary :
-    typeof root.overview === "string" ? root.overview :
-    typeof root.description === "string" ? root.description :
-    null
+  let normalisedSummary: string | null = null
+  let normalisedSections: RawSection[] | null = null
 
-  if (!normalisedSummary || !normalisedSections) {
+  if (Array.isArray(parsed)) {
+    // Model returned the sections array directly — no summary
+    normalisedSections = parsed as RawSection[]
+    normalisedSummary  = ""
+  } else {
+    const root = parsed as RootObj
+    normalisedSections =
+      Array.isArray(root.sections)  ? root.sections  as RawSection[] :
+      Array.isArray(root.data)      ? root.data       as RawSection[] :
+      Array.isArray(root.synthesis) ? root.synthesis  as RawSection[] :
+      null
+
+    normalisedSummary =
+      typeof root.summary     === "string" ? root.summary     :
+      typeof root.overview    === "string" ? root.overview    :
+      typeof root.description === "string" ? root.description :
+      null
+  }
+
+  if (!normalisedSections) {
     dumpRawResponse("synthesis-call-c", raw)
-    throw new Error(`Synthesis: unexpected response shape (keys: ${Object.keys(root).join(", ")}). Raw response saved to synthesis-call-c-raw.txt`)
+    throw new Error(`Synthesis: unexpected response shape (keys: ${Object.keys(parsed as object).join(", ")}). Raw response saved to synthesis-call-c-raw.txt`)
   }
 
   // Merge AI-generated prose with node IDs from the clustering step (by index)
@@ -376,7 +388,7 @@ export async function callSynthesize(
     gaps:             s.gaps ?? [],
   }))
 
-  return { summary: normalisedSummary, sections }
+  return { summary: normalisedSummary ?? "", sections }
 }
 
 // ── Main orchestration ─────────────────────────────────────────────────────────
