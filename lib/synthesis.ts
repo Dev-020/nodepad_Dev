@@ -3,7 +3,24 @@
 import { loadAIConfig, getBaseUrl, getProviderHeaders, type AIConfig } from "@/lib/ai-settings"
 import type { TextBlock } from "@/components/tile-card"
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Progress events ───────────────────────────────────────────────────────────
+
+export type ProgressEvent =
+  | { type: "phase_start";    id: string; label: string }
+  | { type: "phase_done";     id: string; durationMs: number }
+  | { type: "clusters_known"; clusterNames: string[] }
+  | { type: "error";          id: string; message: string }
+
+export interface CallTiming {
+  id: string
+  label: string
+  status: "pending" | "running" | "done" | "error"
+  startTime?: number
+  durationMs?: number
+  isParallel?: boolean
+}
+
+// ── Data types ────────────────────────────────────────────────────────────────
 
 export interface NodeWithContext {
   id: string
@@ -33,13 +50,13 @@ export interface ClusterAssignment {
 export interface SynthesisSection {
   heading: string
   intro: string
+  sectionSynthesis: string
   nodeIds: string[]
   expandingPrompts: string[]
   gaps: string[]
 }
 
 export interface SynthesisOutline {
-  summary: string
   sections: SynthesisSection[]
 }
 
@@ -47,6 +64,7 @@ export interface SynthesisResult {
   outline: SynthesisOutline
   decontextualized: DecontextualizedNode[]
   clusters: ClusterAssignment[]
+  timings: CallTiming[]
 }
 
 // ── Phase 1: Edge map builder ─────────────────────────────────────────────────
@@ -57,7 +75,7 @@ export function buildEdgeMap(blocks: TextBlock[]): EdgeMap {
   const nodes: NodeWithContext[] = []
 
   for (const block of blocks) {
-    const neighborIds = (block.influencedBy ?? []).filter(id => byId.has(id))
+    const neighborIds  = (block.influencedBy ?? []).filter(id => byId.has(id))
     const neighborTexts = neighborIds
       .map(id => byId.get(id)!)
       .map(n => [n.text, n.annotation].filter(Boolean).join(" — "))
@@ -93,15 +111,17 @@ function buildPayload(
   config: AIConfig,
   messages: { role: string; content: string }[],
   maxTokens: number,
+  wantJson = true,
 ) {
-  return config.provider === "ollama"
+  const isOllama = config.provider === "ollama"
+  return isOllama
     ? { model: config.modelId, messages, stream: false, options: { temperature: 0.2 } }
     : {
         model: config.modelId,
         max_tokens: maxTokens,
         messages,
-        response_format: { type: "json_object" },
         temperature: 0.2,
+        ...(wantJson ? { response_format: { type: "json_object" } } : {}),
       }
 }
 
@@ -153,12 +173,21 @@ function extractJson(text: string): string {
   return text.trim()
 }
 
-// ── Phase 2a: Decontextualization (Call A) ────────────────────────────────────
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `<1s`
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1)}s`
+  const m   = Math.floor(s / 60)
+  const rem = Math.round(s % 60)
+  return `${m}m ${rem}s`
+}
+
+// ── Call A: Decontextualisation ───────────────────────────────────────────────
 
 const DECONTEXTUALIZE_SYSTEM = `You rewrite sparse research notes into self-contained statements.
 
 RULES:
-- Use ONLY the note's text, annotation, and provided neighboring notes as context
+- Use ONLY the note's text, annotation, and provided neighbouring notes as context
 - Do NOT draw on external knowledge — if a note is too sparse to expand, return its text unchanged
 - Resolve pronouns, abbreviations, and topic shortcuts using only the provided context
 - One statement per note — a single clear sentence or short paragraph
@@ -186,7 +215,7 @@ export async function callDecontextualize(
   )
 
   const targetUrl = getTargetUrl(config)
-  const payload = buildPayload(config, [
+  const payload   = buildPayload(config, [
     { role: "system", content: DECONTEXTUALIZE_SYSTEM },
     { role: "user",   content: `${sourceCtx}Notes to expand:\n${notesJson}` },
   ], 6000)
@@ -194,20 +223,13 @@ export async function callDecontextualize(
   const raw = await callAI(config, targetUrl, payload)
 
   let parsed: DecontextualizedNode[] = []
-  try {
-    parsed = JSON.parse(extractJson(raw))
-  } catch {
-    return edgeMap.nodes.map(n => ({ id: n.id, statement: n.text }))
-  }
+  try { parsed = JSON.parse(extractJson(raw)) } catch { /* fall through */ }
 
   const resultMap = new Map(parsed.map(n => [n.id, n.statement]))
-  return edgeMap.nodes.map(n => ({
-    id: n.id,
-    statement: resultMap.get(n.id) || n.text,
-  }))
+  return edgeMap.nodes.map(n => ({ id: n.id, statement: resultMap.get(n.id) || n.text }))
 }
 
-// ── Phase 2b: Clustering (Call B) ─────────────────────────────────────────────
+// ── Call B: Clustering ────────────────────────────────────────────────────────
 
 const CLUSTER_SYSTEM = `You group research notes into semantically coherent sections.
 
@@ -241,7 +263,7 @@ export async function callCluster(
   )
 
   const targetUrl = getTargetUrl(config)
-  const payload = buildPayload(config, [
+  const payload   = buildPayload(config, [
     { role: "system", content: CLUSTER_SYSTEM },
     { role: "user",   content: `${sourceCtx}Notes to cluster:\n${notesJson}` },
   ], 2000)
@@ -249,13 +271,10 @@ export async function callCluster(
   const raw = await callAI(config, targetUrl, payload)
 
   let parsed: ClusterAssignment[] = []
-  try {
-    parsed = JSON.parse(extractJson(raw))
-  } catch {
+  try { parsed = JSON.parse(extractJson(raw)) } catch {
     return [{ sectionName: "Notes", nodeIds: edgeMap.nodes.map(n => n.id) }]
   }
 
-  // Ensure every node appears in exactly one section
   const seen   = new Set<string>()
   const allIds = new Set(edgeMap.nodes.map(n => n.id))
   const cleaned: ClusterAssignment[] = []
@@ -276,126 +295,152 @@ export async function callCluster(
   return cleaned
 }
 
-// ── Phase 2c: Synthesis (Call C) ─────────────────────────────────────────────
+// ── Call C×N: Per-cluster synthesis ──────────────────────────────────────────
 
-const SYNTHESIZE_SYSTEM = `You generate a Synthesis Document from research notes.
+const CLUSTER_SYNTHESIZE_SYSTEM = `You are one of several parallel processes each generating the synthesis for one section of a multi-section document.
 
-A Synthesis Document consolidates fragmented notes into a coherent document about the ideas
-and concepts captured in a nodespace. It is NOT a summary — it contextualises notes and
-pushes thinking outward through open, exploratory questions.
+IMPORTANT — PARALLEL PROCESSES:
+Other independent processes are simultaneously generating synthesis for every other section.
+You are responsible for your assigned target section ONLY. This means:
+- Do NOT explain concepts from other sections, even if it would help clarify your own.
+  If a concept from another section is directly relevant, reference it by section name only
+  (e.g. "as explored in the Ideal Theory section") — never explain it yourself.
+- Do NOT generate expounding prompts about topics already covered in other sections.
+- Do NOT flag gaps that are addressed in any other section of this document.
 
-GROUNDING RULES — CRITICAL:
-- Only use the provided statements and source material as your knowledge base
-- Do NOT supplement with external knowledge
-- Where notes are insufficient, flag as a gap explicitly
+GROUNDING RULES:
+- Use only the provided statements, annotations, and source material
+- Do not draw on external knowledge
+- Where notes are insufficient, flag as a gap — only if not addressed in another section
 
-For each section, produce:
-1. A clear section heading (improve the candidate name if needed)
-2. A 1–2 sentence intro: what should the reader understand from this section?
-3. 2–3 expounding prompts — open questions that push thinking into adjacent territory the
-   notes do NOT cover. These invite exploration, not recall.
-   GOOD: "Are there economic systems that critique capital accumulation without requiring collective ownership?"
-   BAD:  "What is the labour theory of value?" (that tests recall, not exploration)
-4. A gaps list: concepts implied by the notes but not explained within them (empty array if none)
+For your target section, produce:
+1. heading — a clear improved section heading (2–5 words)
+2. intro — 1–2 sentences: what will the reader understand from this section?
+3. sectionSynthesis — 2–4 cohesive paragraphs explaining the section as a whole.
+   Weave the statements AND their annotations into flowing prose. Do NOT list notes
+   individually — synthesise them into a unified explanation. Use annotations for depth.
+4. expandingPrompts — 2–3 open questions pushing thinking into territory NOT covered
+   anywhere in this document. Do not ask about topics other sections address.
+5. gaps — concepts implied by this section's notes but unexplained here AND not addressed
+   in any other section. Empty array if none.
 
-Also produce a 2–3 sentence summary of the entire nodespace.
-
-OUTPUT: You MUST return ONLY valid JSON (no markdown, no explanation):
+OUTPUT: Valid JSON only, no markdown, no explanation:
 {
-  "summary": "...",
-  "sections": [{
-    "heading": "...",
-    "intro": "...",
-    "expandingPrompts": ["...", "..."],
-    "gaps": ["..."]
-  }]
+  "heading": "...",
+  "intro": "...",
+  "sectionSynthesis": "...",
+  "expandingPrompts": ["...", "..."],
+  "gaps": ["..."]
 }`
 
-export async function callSynthesize(
-  clusters: ClusterAssignment[],
+type RawClusterResult = Omit<SynthesisSection, "nodeIds">
+
+export async function callSynthesizeCluster(
+  targetCluster: ClusterAssignment,
+  allClusters: ClusterAssignment[],
   decontextualized: DecontextualizedNode[],
-  sourceAnchors: NodeWithContext[],
+  edgeMap: EdgeMap,
   config: AIConfig,
-): Promise<SynthesisOutline> {
-  const stmtMap = new Map(decontextualized.map(n => [n.id, n.statement]))
-  const sourceCtx = sourceAnchors.length > 0
-    ? `SOURCE MATERIAL:\n${sourceAnchors.map(a => `- ${a.text}`).join("\n")}\n\n`
+): Promise<RawClusterResult> {
+  const stmtMap  = new Map(decontextualized.map(n => [n.id, n.statement]))
+  const annotMap = new Map(edgeMap.nodes.map(n => [n.id, n.annotation ?? ""]))
+
+  const nodeSection = new Map<string, string>()
+  for (const cluster of allClusters) {
+    for (const id of cluster.nodeIds) nodeSection.set(id, cluster.sectionName)
+  }
+
+  const sourceCtx = edgeMap.sourceAnchors.length > 0
+    ? `SOURCE MATERIAL:\n${edgeMap.sourceAnchors.map(a => `- ${a.text}`).join("\n")}\n\n`
     : ""
 
-  const sectionsJson = JSON.stringify(
-    clusters.map(c => ({
-      candidateHeading: c.sectionName,
-      statements: c.nodeIds
-        .map(id => stmtMap.get(id))
-        .filter(Boolean),
+  const documentStructure = allClusters
+    .map((c, i) => `Section ${i + 1}: "${c.sectionName}" (${c.nodeIds.length} notes)`)
+    .join("\n")
+
+  const allNotesJson = JSON.stringify(
+    edgeMap.nodes.map(n => ({
+      id:         n.id,
+      section:    nodeSection.get(n.id) ?? "General",
+      statement:  stmtMap.get(n.id) ?? n.text,
+      annotation: annotMap.get(n.id) ?? "",
     })),
     null, 2,
   )
 
+  const userMessage = [
+    sourceCtx,
+    `FULL DOCUMENT STRUCTURE:\n${documentStructure}`,
+    `\nALL NOTES (statements + annotations):\n${allNotesJson}`,
+    `\n---\nYOUR TARGET SECTION: "${targetCluster.sectionName}"`,
+    `Node IDs assigned to this section: [${targetCluster.nodeIds.join(", ")}]`,
+    `\nGenerate the synthesis for this section only.`,
+  ].join("\n")
+
   const targetUrl = getTargetUrl(config)
-  const payload = buildPayload(config, [
-    { role: "system", content: SYNTHESIZE_SYSTEM },
-    { role: "user",   content: `${sourceCtx}Sections to synthesise:\n${sectionsJson}` },
+  const payload   = buildPayload(config, [
+    { role: "system", content: CLUSTER_SYNTHESIZE_SYSTEM },
+    { role: "user",   content: userMessage },
   ], 4000)
 
   const raw = await callAI(config, targetUrl, payload)
 
-  let parsed: { summary?: string; sections?: Omit<SynthesisSection, "nodeIds">[] }
   try {
-    parsed = JSON.parse(extractJson(raw))
+    const parsed = JSON.parse(extractJson(raw)) as RawClusterResult
+    return {
+      heading:          parsed.heading          ?? targetCluster.sectionName,
+      intro:            parsed.intro            ?? "",
+      sectionSynthesis: parsed.sectionSynthesis ?? "",
+      expandingPrompts: Array.isArray(parsed.expandingPrompts) ? parsed.expandingPrompts : [],
+      gaps:             Array.isArray(parsed.gaps)             ? parsed.gaps             : [],
+    }
   } catch {
-    dumpRawResponse("synthesis-call-c", raw)
-    throw new Error("Synthesis: AI returned non-JSON. Raw response saved to synthesis-call-c-raw.txt")
+    const safeLabel = targetCluster.sectionName.replace(/\s+/g, "-").replace(/[^a-z0-9-]/gi, "")
+    dumpRawResponse(`synthesis-callC-${safeLabel}`, raw)
+    throw new Error(`Synthesis (${targetCluster.sectionName}): could not parse AI response. Raw saved to file.`)
   }
-
-  // Normalise: handle both array-at-root and object shapes
-  type RawSection = Omit<SynthesisSection, "nodeIds">
-  type RootObj    = Record<string, unknown>
-
-  let normalisedSummary: string | null = null
-  let normalisedSections: RawSection[] | null = null
-
-  if (Array.isArray(parsed)) {
-    // Model returned the sections array directly — no summary
-    normalisedSections = parsed as RawSection[]
-    normalisedSummary  = ""
-  } else {
-    const root = parsed as RootObj
-    normalisedSections =
-      Array.isArray(root.sections)  ? root.sections  as RawSection[] :
-      Array.isArray(root.data)      ? root.data       as RawSection[] :
-      Array.isArray(root.synthesis) ? root.synthesis  as RawSection[] :
-      null
-
-    normalisedSummary =
-      typeof root.summary     === "string" ? root.summary     :
-      typeof root.overview    === "string" ? root.overview    :
-      typeof root.description === "string" ? root.description :
-      null
-  }
-
-  if (!normalisedSections) {
-    dumpRawResponse("synthesis-call-c", raw)
-    throw new Error(`Synthesis: unexpected response shape (keys: ${Object.keys(parsed as object).join(", ")}). Raw response saved to synthesis-call-c-raw.txt`)
-  }
-
-  // Merge AI-generated prose with node IDs from the clustering step (by index)
-  const sections: SynthesisSection[] = normalisedSections.map((s, i) => ({
-    heading:          s.heading ?? clusters[i]?.sectionName ?? `Section ${i + 1}`,
-    intro:            s.intro ?? "",
-    nodeIds:          clusters[i]?.nodeIds ?? [],
-    expandingPrompts: s.expandingPrompts ?? [],
-    gaps:             s.gaps ?? [],
-  }))
-
-  return { summary: normalisedSummary ?? "", sections }
 }
 
-// ── Main orchestration ─────────────────────────────────────────────────────────
+// ── Call D: Final editorial polish ────────────────────────────────────────────
+
+const POLISH_SYSTEM = `You are performing a final editorial polish on a synthesis document.
+
+The document was generated section-by-section by independent parallel processes. Your job
+is to refine it as a whole for coherence, flow, and consistency across sections.
+
+You MAY:
+- Refine section headings to form a more coherent document sequence
+- Adjust intro sentences to acknowledge adjacent sections where natural
+- Add brief cross-references between sections where concepts connect
+- Standardise terminology used inconsistently across sections
+- Tighten synthesis paragraphs for clarity and cross-section flow
+
+You MUST NOT:
+- Change any line starting with "> *Source: node" — these are factual attributions
+- Rewrite or remove the [!example], [!question], [!note], or [!info] callout blocks
+- Add information not present in the draft
+- Alter factual claims in synthesis paragraphs — editorial refinement only
+
+Return the complete refined markdown document and nothing else.`
+
+export async function callPolish(
+  draftMarkdown: string,
+  config: AIConfig,
+): Promise<string> {
+  const targetUrl = getTargetUrl(config)
+  const payload   = buildPayload(config, [
+    { role: "system", content: POLISH_SYSTEM },
+    { role: "user",   content: `Polish the following synthesis document:\n\n${draftMarkdown}` },
+  ], 8000, false)
+
+  return callAI(config, targetUrl, payload)
+}
+
+// ── Main orchestration ────────────────────────────────────────────────────────
 
 export async function generateSynthesisDocument(
   blocks: TextBlock[],
-  onProgress?: (step: string) => void,
+  onProgress: (event: ProgressEvent) => void,
 ): Promise<SynthesisResult> {
   const config = loadAIConfig()
   if (!config) throw new Error("No AI provider configured. Add an API key in Settings.")
@@ -403,21 +448,85 @@ export async function generateSynthesisDocument(
   const enrichedBlocks = blocks.filter(b => !b.isEnriching && !b.isError)
   if (enrichedBlocks.length === 0) throw new Error("No notes to synthesise. Add some notes to the canvas first.")
 
-  onProgress?.("Building note graph…")
-  const edgeMap = buildEdgeMap(enrichedBlocks)
+  const timings: CallTiming[] = []
 
+  function startCall(id: string, label: string, isParallel = false): number {
+    const startTime = Date.now()
+    timings.push({ id, label, status: "running", startTime, isParallel })
+    onProgress({ type: "phase_start", id, label })
+    return startTime
+  }
+
+  function doneCall(id: string, startTime: number) {
+    const durationMs = Date.now() - startTime
+    const t = timings.find(t => t.id === id)
+    if (t) { t.status = "done"; t.durationMs = durationMs }
+    onProgress({ type: "phase_done", id, durationMs })
+  }
+
+  function errorCall(id: string, message: string) {
+    const t = timings.find(t => t.id === id)
+    if (t) t.status = "error"
+    onProgress({ type: "error", id, message })
+  }
+
+  // Phase 1 — edge map (instant)
+  const edgeMap = buildEdgeMap(enrichedBlocks)
   if (edgeMap.nodes.length === 0) {
     throw new Error("All notes are reference nodes. Add content notes to the canvas.")
   }
 
-  onProgress?.("Decontextualising and clustering notes…")
-  const [decontextualized, clusters] = await Promise.all([
-    callDecontextualize(edgeMap, config),
-    callCluster(edgeMap, config),
-  ])
+  // Calls A + B — parallel
+  const startA = startCall("callA", "Decontextualising notes", true)
+  const startB = startCall("callB", "Clustering sections", true)
 
-  onProgress?.("Writing synthesis…")
-  const outline = await callSynthesize(clusters, decontextualized, edgeMap.sourceAnchors, config)
+  let decontextualized: DecontextualizedNode[]
+  let clusters: ClusterAssignment[]
 
-  return { outline, decontextualized, clusters }
+  try {
+    ;[decontextualized, clusters] = await Promise.all([
+      callDecontextualize(edgeMap, config)
+        .then(r  => { doneCall("callA", startA); return r })
+        .catch(e => { errorCall("callA", String(e)); throw e }),
+      callCluster(edgeMap, config)
+        .then(r  => {
+          doneCall("callB", startB)
+          onProgress({ type: "clusters_known", clusterNames: r.map(c => c.sectionName) })
+          return r
+        })
+        .catch(e => { errorCall("callB", String(e)); throw e }),
+    ])
+  } catch (e) { throw e }
+
+  // Calls C×N — parallel, one per cluster
+  const clusterStarts = clusters.map((cluster, i) =>
+    startCall(`callC-${i}`, cluster.sectionName, true)
+  )
+
+  let sectionResults: RawClusterResult[]
+  try {
+    sectionResults = await Promise.all(
+      clusters.map((cluster, i) =>
+        callSynthesizeCluster(cluster, clusters, decontextualized, edgeMap, config)
+          .then(r  => { doneCall(`callC-${i}`, clusterStarts[i]); return r })
+          .catch(e => { errorCall(`callC-${i}`, String(e)); throw e })
+      )
+    )
+  } catch (e) { throw e }
+
+  const sections: SynthesisSection[] = clusters.map((cluster, i) => ({
+    ...sectionResults[i],
+    nodeIds: cluster.nodeIds,
+  }))
+
+  return {
+    outline: { sections },
+    decontextualized,
+    clusters,
+    timings,
+  }
+}
+
+export function getSourceAnchors(blocks: TextBlock[]): TextBlock[] {
+  return blocks.filter(b => b.contentType === "reference")
 }

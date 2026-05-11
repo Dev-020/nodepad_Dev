@@ -13,14 +13,26 @@ import { IntroModal } from "@/components/intro-modal"
 import type { TextBlock } from "@/components/tile-card"
 import type { ContentType } from "@/lib/content-types"
 import { INITIAL_PROJECTS } from "@/lib/initial-data"
-import { useAISettings } from "@/lib/ai-settings"
+import { useAISettings, loadAIConfig } from "@/lib/ai-settings"
 import { enrichBlockClient } from "@/lib/ai-enrich"
 import { generateGhostClient } from "@/lib/ai-ghost"
 import { exportToMarkdown, downloadMarkdown, copyToClipboard } from "@/lib/export"
 import { downloadNodepadFile, parseNodepadFile, NodepadParseError } from "@/lib/nodepad-format"
 import { detectContentType } from "@/lib/detect-content-type"
-import { generateSynthesisDocument } from "@/lib/synthesis"
-import { renderSynthesisDocument, slugifySynthesis } from "@/lib/synthesis-export"
+import {
+  generateSynthesisDocument,
+  callPolish,
+  getSourceAnchors,
+  type CallTiming,
+  type ProgressEvent,
+} from "@/lib/synthesis"
+import {
+  renderSynthesisDocument,
+  renderPolishedDocument,
+  slugifySynthesis,
+} from "@/lib/synthesis-export"
+import { SynthesisConfirmDialog } from "@/components/synthesis-confirm-dialog"
+import { SynthesisProgressPanel } from "@/components/synthesis-progress-panel"
 
 function generateId() {
   return Math.random().toString(36).substring(2, 10)
@@ -60,8 +72,17 @@ export default function Page() {
   // ── Undo history ring (max 20 block snapshots per project) ───────────────
   const blockHistoryRef = useRef<Record<string, TextBlock[][]>>({})
   const [undoToast, setUndoToast] = useState<string | null>(null)
-  const [synthesisStatus, setSynthesisStatus] = useState<string | null>(null)
   const undoToastTimer = useRef<NodeJS.Timeout | null>(null)
+
+  // ── Synthesis state ─────────────────────────────────────────────────────────
+  const [synthConfirmOpen,   setSynthConfirmOpen]   = useState(false)
+  const [synthProgressOpen,  setSynthProgressOpen]  = useState(false)
+  const [synthCalls,         setSynthCalls]         = useState<CallTiming[]>([])
+  const [synthActive,        setSynthActive]        = useState(false)
+  const [synthTotalStart,    setSynthTotalStart]    = useState<number | undefined>(undefined)
+  const [synthSourceAnchors, setSynthSourceAnchors] = useState<TextBlock[]>([])
+  const [synthBlockCount,    setSynthBlockCount]    = useState(0)
+  const synthEnablePolish    = useRef(false)
 
   const pushHistory = useCallback((projectId: string, currentBlocks: TextBlock[]) => {
     if (!blockHistoryRef.current[projectId]) blockHistoryRef.current[projectId] = []
@@ -884,21 +905,9 @@ export default function Page() {
     } else if (cmd === "synthesis-doc") {
       const proj = projectsRef.current.find(p => p.id === activeProjectId)
       if (proj) {
-        const blocks = proj.blocks
-        const name   = proj.name
-        setSynthesisStatus("Building note graph…")
-        generateSynthesisDocument(blocks, setSynthesisStatus)
-          .then(({ outline, decontextualized, clusters }) => {
-            const md   = renderSynthesisDocument(name, outline, decontextualized, clusters)
-            const slug = slugifySynthesis(name)
-            downloadMarkdown(`${slug}-synthesis.md`, md)
-            setSynthesisStatus(null)
-          })
-          .catch((err: Error) => {
-            console.error("[synthesis]", err)
-            setSynthesisStatus(`Error: ${err.message}`)
-            setTimeout(() => setSynthesisStatus(null), 5000)
-          })
+        setSynthSourceAnchors(getSourceAnchors(proj.blocks))
+        setSynthBlockCount(proj.blocks.length)
+        setSynthConfirmOpen(true)
       }
     }
 
@@ -908,6 +917,92 @@ export default function Page() {
     
     setIsCommandKOpen(false)
   }, [clearBlocks, addBlock, activeProjectId])
+
+  // ── Synthesis: start generation after confirm dialog ─────────────────────────
+  const startSynthesis = useCallback((enablePolish: boolean) => {
+    const proj = projectsRef.current.find(p => p.id === activeProjectId)
+    if (!proj) return
+
+    synthEnablePolish.current = enablePolish
+    setSynthConfirmOpen(false)
+    setSynthCalls([])
+    setSynthActive(true)
+    setSynthTotalStart(Date.now())
+    setSynthProgressOpen(false)
+
+    const blocks = proj.blocks
+    const name   = proj.name
+    const slug   = slugifySynthesis(name)
+
+    const onProgress = (event: ProgressEvent) => {
+      setSynthCalls(prev => {
+        const next = [...prev]
+        if (event.type === "phase_start") {
+          next.push({
+            id: event.id, label: event.label, status: "running",
+            startTime: Date.now(),
+            isParallel: event.id.startsWith("callC-") || event.id === "callA" || event.id === "callB",
+          })
+        } else if (event.type === "phase_done") {
+          const t = next.find(t => t.id === event.id)
+          if (t) { t.status = "done"; t.durationMs = event.durationMs }
+        } else if (event.type === "error") {
+          const t = next.find(t => t.id === event.id)
+          if (t) t.status = "error"
+        }
+        return next
+      })
+    }
+
+    generateSynthesisDocument(blocks, onProgress)
+      .then(async ({ outline, decontextualized, clusters, timings }) => {
+        // Render raw (with timing footer)
+        const rawMd = renderSynthesisDocument(name, outline, decontextualized, clusters, timings, false)
+        downloadMarkdown(`${slug}-synthesis.md`, rawMd)
+
+        if (enablePolish) {
+          // Register Call D in progress
+          const dStart = Date.now()
+          setSynthCalls(prev => [...prev, {
+            id: "callD", label: "Final editorial polish",
+            status: "running", startTime: dStart, isParallel: false,
+          }])
+
+          try {
+            const config = loadAIConfig()
+            if (!config) throw new Error("No AI config for polish")
+
+            // Draft without timing footer for cleaner polish input
+            const draftForPolish = renderSynthesisDocument(name, outline, decontextualized, clusters, [], false)
+            const polishedText   = await callPolish(draftForPolish, config)
+            const polishDuration = Date.now() - dStart
+
+            setSynthCalls(prev => prev.map(c =>
+              c.id === "callD" ? { ...c, status: "done", durationMs: polishDuration } : c
+            ))
+
+            // Add Call D to timings for footer
+            const fullTimings: CallTiming[] = [
+              ...timings,
+              { id: "callD", label: "Final editorial polish", status: "done", durationMs: polishDuration },
+            ]
+            const polishedMd = renderPolishedDocument(polishedText, fullTimings)
+            downloadMarkdown(`${slug}-synthesis-polished.md`, polishedMd)
+          } catch (e) {
+            setSynthCalls(prev => prev.map(c =>
+              c.id === "callD" ? { ...c, status: "error" } : c
+            ))
+            console.error("[synthesis polish]", e)
+          }
+        }
+
+        setSynthActive(false)
+      })
+      .catch((err: Error) => {
+        console.error("[synthesis]", err)
+        setSynthActive(false)
+      })
+  }, [activeProjectId])
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
@@ -1050,29 +1145,24 @@ export default function Page() {
           />
         </div>
 
-        {/* Synthesis status toast */}
-        <AnimatePresence>
-          {synthesisStatus && (
-            <motion.div
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
-              transition={{ duration: 0.15, ease: "easeOut" }}
-              className="absolute bottom-[104px] left-1/2 -translate-x-1/2 z-[130] pointer-events-none"
-            >
-              <div className="px-3 py-1.5 rounded-sm bg-black/90 border border-white/15 backdrop-blur-md shadow-xl flex items-center gap-2">
-                {!synthesisStatus.startsWith("Error") && (
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
-                    className="h-2.5 w-2.5 rounded-full border border-white/40 border-t-white/80"
-                  />
-                )}
-                <span className="font-mono text-[10px] text-white/70 tracking-tight whitespace-nowrap">{synthesisStatus}</span>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Synthesis confirm dialog */}
+        <SynthesisConfirmDialog
+          isOpen={synthConfirmOpen}
+          sourceAnchors={synthSourceAnchors}
+          blockCount={synthBlockCount}
+          onConfirm={startSynthesis}
+          onCancel={() => setSynthConfirmOpen(false)}
+        />
+
+        {/* Synthesis progress pill + dialog */}
+        <SynthesisProgressPanel
+          calls={synthCalls}
+          isActive={synthActive}
+          totalStartMs={synthTotalStart}
+          isDialogOpen={synthProgressOpen}
+          onPillClick={() => setSynthProgressOpen(true)}
+          onDialogClose={() => setSynthProgressOpen(false)}
+        />
 
         {/* Undo toast */}
         <AnimatePresence>
