@@ -84,20 +84,20 @@
   max-height: 1.25rem;
 }
 
-/* Obsidian's .view-content button/input rules override Tailwind padding utilities */
-.nodepad-view button:is(.p-1)     { padding: 0.25rem;  }
-.nodepad-view button:is(.p-1\.5)  { padding: 0.375rem; }
-.nodepad-view button:is(.p-2)     { padding: 0.5rem;   }
-.nodepad-view button:is(.p-3)     { padding: 0.75rem;  }
-.nodepad-view button:is(.py-1)    { padding-top: 0.25rem;   padding-bottom: 0.25rem;  }
-.nodepad-view button:is(.py-1\.5) { padding-top: 0.375rem;  padding-bottom: 0.375rem; }
-.nodepad-view button:is(.py-2)    { padding-top: 0.5rem;    padding-bottom: 0.5rem;   }
-.nodepad-view button:is(.py-3)    { padding-top: 0.75rem;   padding-bottom: 0.75rem;  }
-.nodepad-view button:is(.py-4)    { padding-top: 1rem;      padding-bottom: 1rem;     }
-.nodepad-view button:is(.px-1)    { padding-left: 0.25rem;  padding-right: 0.25rem;  }
-.nodepad-view button:is(.px-1\.5) { padding-left: 0.375rem; padding-right: 0.375rem; }
-.nodepad-view button:is(.px-2)    { padding-left: 0.5rem;   padding-right: 0.5rem;   }
-.nodepad-view button:is(.px-3)    { padding-left: 0.75rem;  padding-right: 0.75rem;  }
-.nodepad-view button:is(.px-4)    { padding-left: 1rem;     padding-right: 1rem;     }
-.nodepad-view button:is(.px-5)    { padding-left: 1.25rem;  padding-right: 1.25rem;  }
-.nodepad-view button:is(.h-full)  { height: 100%; }
+/* Obsidian's .view-content button rule zeroes padding — !important needed to restore Tailwind values */
+.nodepad-view button:is(.p-1)     { padding: 0.25rem  !important; }
+.nodepad-view button:is(.p-1\.5)  { padding: 0.375rem !important; }
+.nodepad-view button:is(.p-2)     { padding: 0.5rem   !important; }
+.nodepad-view button:is(.p-3)     { padding: 0.75rem  !important; }
+.nodepad-view button:is(.py-1)    { padding-top: 0.25rem   !important; padding-bottom: 0.25rem   !important; }
+.nodepad-view button:is(.py-1\.5) { padding-top: 0.375rem  !important; padding-bottom: 0.375rem  !important; }
+.nodepad-view button:is(.py-2)    { padding-top: 0.5rem    !important; padding-bottom: 0.5rem    !important; }
+.nodepad-view button:is(.py-3)    { padding-top: 0.75rem   !important; padding-bottom: 0.75rem   !important; }
+.nodepad-view button:is(.py-4)    { padding-top: 1rem      !important; padding-bottom: 1rem      !important; }
+.nodepad-view button:is(.px-1)    { padding-left: 0.25rem  !important; padding-right: 0.25rem   !important; }
+.nodepad-view button:is(.px-1\.5) { padding-left: 0.375rem !important; padding-right: 0.375rem  !important; }
+.nodepad-view button:is(.px-2)    { padding-left: 0.5rem   !important; padding-right: 0.5rem    !important; }
+.nodepad-view button:is(.px-3)    { padding-left: 0.75rem  !important; padding-right: 0.75rem   !important; }
+.nodepad-view button:is(.px-4)    { padding-left: 1rem     !important; padding-right: 1rem      !important; }
+.nodepad-view button:is(.px-5)    { padding-left: 1.25rem  !important; padding-right: 1.25rem   !important; }
+.nodepad-view button:is(.h-full)  { height: 100% !important; }
