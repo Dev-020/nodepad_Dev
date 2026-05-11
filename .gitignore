@@ -19,5 +19,8 @@ next-env.d.ts
 plugin/dist/
 plugin/node_modules/
 
+# Local vault-linking script (personal utility, not part of the codebase)
+add-vault.ps1
+
 # Internal docs
 CLAUDE.md

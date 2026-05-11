@@ -166,12 +166,17 @@ function isSameOriginRequest(req: NextRequest): boolean {
   const origin = req.headers.get("origin")
   const referer = req.headers.get("referer")
   const secFetchSite = req.headers.get("sec-fetch-site")
+  
+  // Get the actual host the user is visiting (e.g., 192.168.3.73:3000)
+  const host = req.headers.get("host")
+  const protocol = req.nextUrl.protocol
+  const actualOrigin = `${protocol}//${host}`
 
   // 1. Check Origin (usually present on POST)
-  if (origin && origin === req.nextUrl.origin) return true
+  if (origin && (origin === req.nextUrl.origin || origin === actualOrigin)) return true
 
   // 2. Check Referer (usually present on GET)
-  if (referer && referer.startsWith(req.nextUrl.origin)) return true
+  if (referer && (referer.startsWith(req.nextUrl.origin) || referer.startsWith(actualOrigin))) return true
 
   // 3. Check Sec-Fetch-Site (modern browser standard)
   if (secFetchSite === "same-origin" || secFetchSite === "none") return true
