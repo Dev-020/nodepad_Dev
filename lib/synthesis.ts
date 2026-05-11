@@ -6,10 +6,9 @@ import type { TextBlock } from "@/components/tile-card"
 // ── Progress events ───────────────────────────────────────────────────────────
 
 export type ProgressEvent =
-  | { type: "phase_start";    id: string; label: string }
-  | { type: "phase_done";     id: string; durationMs: number }
-  | { type: "clusters_known"; clusterNames: string[] }
-  | { type: "error";          id: string; message: string }
+  | { type: "phase_start"; id: string; label: string }
+  | { type: "phase_done";  id: string; durationMs: number }
+  | { type: "error";       id: string; message: string }
 
 export interface CallTiming {
   id: string
@@ -512,11 +511,7 @@ export async function generateSynthesisDocument(
         .then(r  => { doneCall("callA", startA); return r })
         .catch(e => { errorCall("callA", String(e)); throw e }),
       callCluster(edgeMap, config)
-        .then(r  => {
-          doneCall("callB", startB)
-          onProgress({ type: "clusters_known", clusterNames: r.map(c => c.sectionName) })
-          return r
-        })
+        .then(r  => { doneCall("callB", startB); return r })
         .catch(e => { errorCall("callB", String(e)); throw e }),
     ])
   } catch (e) { throw e }

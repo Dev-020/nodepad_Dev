@@ -194,9 +194,9 @@
 
 ## 🔭 Upcoming Features
 
-### [#027] Obsidian Plugin — Synthesis Document Generation
-- **Status**: `Open` | **Priority**: `P2` | **Labels**: `Feature`, `Obsidian`, `AI`
-- **Created**: 2026-05-11
+### [#027] Synthesis Document Generation
+- **Status**: `Closed (web-app)` · `Open (plugin port)` | **Priority**: `P2` | **Labels**: `Feature`, `AI`
+- **Created**: 2026-05-11 | **Web-app resolved**: 2026-05-11
 - **Design spec**: [`docs/synthesis-document-plan.md`](docs/synthesis-document-plan.md)
 - **Description**: On-demand command ("Generate Synthesis Document") that consolidates enriched nodes from a `.nodepad` canvas into a structured, contextualized Obsidian markdown document. Unlike the raw markdown export which dumps nodes grouped by type, this pipeline expands sparse notes into self-contained statements, clusters them into coherent thematic sections by meaning, and adds expounding prompts that push thinking into adjacent territory the notes don't cover. Acts as the bridge from nodepad's raw idea staging area into Obsidian's permanent knowledge graph.
 - **Pipeline**:
