@@ -693,9 +693,13 @@ function NodepadApp({ plugin, initialData, fileName, folderPath, onSave, onMenuC
       copyToClipboard(md)
       new Notice("Copied to clipboard")
     }
+    else if (cmd === "synthesis-doc") {
+      setSynthSourceAnchors(getSourceAnchors(blocks))
+      setSynthConfirmOpen(true)
+    }
     else if (cmd === "task"   && text) addBlock(text, "task")
     else if (cmd === "thesis" && text) addBlock(text, "thesis")
-  }, [clearBlocks, addBlock, fileName, folderPath, plugin])
+  }, [clearBlocks, addBlock, fileName, folderPath, plugin, blocks])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
