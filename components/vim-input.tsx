@@ -15,7 +15,7 @@ const ALL_ACTION_ITEMS = [
   { id: "import-nodepad", icon: FolderInput, label: "Import",  sub: ".nodepad", pluginOnly: false },
   { id: "export-md",      icon: Download,    label: "Export",  sub: "markdown", pluginOnly: true  },
   { id: "copy-md",       icon: Clipboard,  label: "Copy",      sub: "markdown", pluginOnly: true  },
-  { id: "synthesis-doc", icon: ScrollText, label: "Synthesis", sub: "document", pluginOnly: false },
+  { id: "synthesis-doc", icon: ScrollText, label: "Synthesis", sub: "document", pluginOnly: true  },
   { id: "clear",         icon: Trash2,     label: "Clear",     sub: "canvas",   pluginOnly: true  },
 ]
 
@@ -27,11 +27,12 @@ interface VimInputProps {
   isCommandKOpen: boolean
   setIsCommandKOpen: (open: boolean) => void
   isPlugin?: boolean
+  onUndo?: () => void
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpen, isPlugin }: VimInputProps) {
+export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpen, isPlugin, onUndo }: VimInputProps) {
   const [value, setValue] = React.useState("")
   const [search, setSearch] = React.useState("")
   const [focusedIdx, setFocusedIdx] = React.useState(0)
@@ -365,23 +366,31 @@ export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpe
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onUndo}
+              className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-white/[0.06] active:scale-95 transition-all"
+            >
               <kbd className="flex h-5 items-center rounded border border-white/10 bg-white/5 px-1.5 font-mono text-[9px] text-white/60">
                 <span className="text-[11px] mr-1">⌘</span>
                 <span>Z</span>
               </kbd>
               <span className="text-[9px] font-mono font-bold text-white/55 uppercase tracking-tighter">Undo</span>
-            </div>
+            </button>
 
             <div className="h-4 w-px bg-white/10" />
 
-            <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsCommandKOpen(true)}
+              className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-white/[0.06] active:scale-95 transition-all"
+            >
               <kbd className="flex h-5 items-center rounded border border-white/10 bg-white/5 px-1.5 font-mono text-[9px] text-white/60">
                 <span className="text-[11px] mr-1">⌘</span>
                 <span>K</span>
               </kbd>
               <span className="text-[9px] font-mono font-bold text-white/55 uppercase tracking-tighter">Commands</span>
-            </div>
+            </button>
 
             <div className="h-4 w-px bg-white/20" />
 

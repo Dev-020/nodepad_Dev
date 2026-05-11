@@ -1188,6 +1188,7 @@ export default function Page() {
           onCommand={handleCommand}
           isCommandKOpen={isCommandKOpen}
           setIsCommandKOpen={setIsCommandKOpen}
+          onUndo={undo}
         />
       </div>
 
