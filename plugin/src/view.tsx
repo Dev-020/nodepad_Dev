@@ -561,7 +561,8 @@ function NodepadApp({ plugin, initialData, fileName, folderPath, onSave, onMenuC
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  const hasKey = plugin.settings.provider === "geminicli" || !!plugin.settings.apiKey
+  const isLocalOllama = plugin.settings.provider === "ollama" && plugin.settings.useLocalOllama
+  const hasKey = plugin.settings.provider === "geminicli" || isLocalOllama || !!plugin.settings.apiKey
   const modelLabel = hasKey ? plugin.settings.modelId.split("/").pop() : undefined
 
   return (

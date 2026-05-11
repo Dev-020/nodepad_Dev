@@ -47,9 +47,11 @@ const GROUNDING_PROVIDERS = new Set<AIProvider>(["openrouter", "openai", "ollama
 
 export function getPluginAIConfig(plugin: NodepadPlugin): AIConfig | null {
   const { settings } = plugin
-  if (!settings.apiKey && settings.provider !== "geminicli") return null
+  const isLocalOllama = settings.provider === "ollama" && settings.useLocalOllama
+  const isKeyless = settings.provider === "geminicli" || isLocalOllama
+  if (!settings.apiKey && !isKeyless) return null
   return {
-    apiKey: settings.apiKey || "local-cli",
+    apiKey: settings.apiKey || "",
     modelId: settings.modelId || "openai/gpt-4o",
     supportsGrounding: settings.webGrounding && GROUNDING_PROVIDERS.has(settings.provider as AIProvider),
     provider: settings.provider as AIProvider,
@@ -528,7 +530,7 @@ export async function enrichBlock(
     const response = await requestUrl({
       url: `${base}/api/chat`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getProviderHeaders(config),
       body: JSON.stringify({
         model,
         messages: [
@@ -644,7 +646,7 @@ Return ONLY valid JSON:
     const response = await requestUrl({
       url: `${base}/api/chat`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getProviderHeaders(config),
       body: JSON.stringify({
         model,
         messages: [{ role: "user", content: prompt }],
