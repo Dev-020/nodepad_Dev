@@ -882,19 +882,12 @@ export default function Page() {
         return prev
       })
     } else if (cmd === "synthesis-doc") {
-      // Capture current project snapshot synchronously, then run async pipeline
-      let blocks: TextBlock[] | null = null
-      let projName = ""
-      setProjects(prev => {
-        const proj = prev.find(p => p.id === activeProjectId)
-        if (proj) { blocks = proj.blocks; projName = proj.name }
-        return prev
-      })
-      if (blocks) {
-        const captured = blocks as TextBlock[]
-        const name     = projName
+      const proj = projectsRef.current.find(p => p.id === activeProjectId)
+      if (proj) {
+        const blocks = proj.blocks
+        const name   = proj.name
         setSynthesisStatus("Building note graph…")
-        generateSynthesisDocument(captured, setSynthesisStatus)
+        generateSynthesisDocument(blocks, setSynthesisStatus)
           .then(({ outline, decontextualized, clusters }) => {
             const md   = renderSynthesisDocument(name, outline, decontextualized, clusters)
             const slug = slugifySynthesis(name)
