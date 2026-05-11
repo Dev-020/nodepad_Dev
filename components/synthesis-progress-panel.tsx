@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { CheckCircle, AlertCircle, X, ChevronUp } from "lucide-react"
 import type { CallTiming } from "@/lib/synthesis"
@@ -13,6 +14,7 @@ interface SynthesisProgressPanelProps {
   isDialogOpen: boolean
   onPillClick: () => void
   onDialogClose: () => void
+  container?: HTMLElement
 }
 
 // ── Elapsed timer for running calls ──────────────────────────────────────────
@@ -183,6 +185,7 @@ export function SynthesisProgressPanel({
   isDialogOpen,
   onPillClick,
   onDialogClose,
+  container,
 }: SynthesisProgressPanelProps) {
   const now        = useElapsed(isActive)
   const doneCount  = calls.filter(c => c.status === "done").length
@@ -206,7 +209,7 @@ export function SynthesisProgressPanel({
 
   const showPill = calls.length > 0 && !dismissed
 
-  return (
+  const panel = (
     <>
       {/* Bottom pill */}
       <AnimatePresence>
@@ -263,4 +266,6 @@ export function SynthesisProgressPanel({
       </AnimatePresence>
     </>
   )
+
+  return container ? createPortal(panel, container) : panel
 }

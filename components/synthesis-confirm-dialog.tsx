@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { motion, AnimatePresence } from "framer-motion"
 import { AlertTriangle, BookOpen, CheckSquare, Square, X } from "lucide-react"
 import type { TextBlock } from "@/components/tile-card"
@@ -11,6 +12,7 @@ interface SynthesisConfirmDialogProps {
   blockCount: number
   onConfirm: (enablePolish: boolean) => void
   onCancel: () => void
+  container?: HTMLElement
 }
 
 export function SynthesisConfirmDialog({
@@ -19,6 +21,7 @@ export function SynthesisConfirmDialog({
   blockCount,
   onConfirm,
   onCancel,
+  container,
 }: SynthesisConfirmDialogProps) {
   const [enablePolish, setEnablePolish] = React.useState(false)
 
@@ -31,7 +34,7 @@ export function SynthesisConfirmDialog({
 
   const hasAnchors = sourceAnchors.length > 0
 
-  return (
+  const content = (
     <AnimatePresence>
       {isOpen && (
         <>
@@ -168,4 +171,6 @@ export function SynthesisConfirmDialog({
       )}
     </AnimatePresence>
   )
+
+  return container ? createPortal(content, container) : content
 }

@@ -124,7 +124,17 @@ function buildPayload(
       }
 }
 
-async function callAI(config: AIConfig, targetUrl: string, payload: object): Promise<string> {
+// ── Injectable transport ──────────────────────────────────────────────────────
+// The web-app routes through /api/ai; the plugin uses requestUrl/spawnCLI
+// directly. Pass a SynthesisCallFn to swap the transport layer.
+
+export type SynthesisCallFn = (
+  config: AIConfig,
+  targetUrl: string,
+  payload: object,
+) => Promise<string>
+
+async function defaultCallAI(config: AIConfig, targetUrl: string, payload: object): Promise<string> {
   const response = await fetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -209,6 +219,7 @@ OUTPUT: You MUST return a JSON array with one entry per input note, in the same 
 export async function callDecontextualize(
   edgeMap: EdgeMap,
   config: AIConfig,
+  callFn: SynthesisCallFn = defaultCallAI,
 ): Promise<DecontextualizedNode[]> {
   const sourceCtx = edgeMap.sourceAnchors.length > 0
     ? `SOURCE MATERIAL:\n${edgeMap.sourceAnchors.map(a => `- ${a.text}`).join("\n")}\n\n`
@@ -230,7 +241,7 @@ export async function callDecontextualize(
     { role: "user",   content: `${sourceCtx}Notes to expand:\n${notesJson}` },
   ], 6000)
 
-  const raw = await callAI(config, targetUrl, payload)
+  const raw = await callFn(config, targetUrl, payload)
 
   let parsed: DecontextualizedNode[] = []
   try { parsed = JSON.parse(extractJson(raw)) } catch { /* fall through */ }
@@ -256,6 +267,7 @@ OUTPUT: You MUST return a JSON array:
 export async function callCluster(
   edgeMap: EdgeMap,
   config: AIConfig,
+  callFn: SynthesisCallFn = defaultCallAI,
 ): Promise<ClusterAssignment[]> {
   const sourceCtx = edgeMap.sourceAnchors.length > 0
     ? `SOURCE MATERIAL:\n${edgeMap.sourceAnchors.map(a => `- ${a.text}`).join("\n")}\n\n`
@@ -278,7 +290,7 @@ export async function callCluster(
     { role: "user",   content: `${sourceCtx}Notes to cluster:\n${notesJson}` },
   ], 2000)
 
-  const raw = await callAI(config, targetUrl, payload)
+  const raw = await callFn(config, targetUrl, payload)
 
   let parsed: ClusterAssignment[] = []
   try { parsed = JSON.parse(extractJson(raw)) } catch {
@@ -351,6 +363,7 @@ export async function callSynthesizeCluster(
   decontextualized: DecontextualizedNode[],
   edgeMap: EdgeMap,
   config: AIConfig,
+  callFn: SynthesisCallFn = defaultCallAI,
 ): Promise<RawClusterResult> {
   const stmtMap  = new Map(decontextualized.map(n => [n.id, n.statement]))
   const annotMap = new Map(edgeMap.nodes.map(n => [n.id, n.annotation ?? ""]))
@@ -393,7 +406,7 @@ export async function callSynthesizeCluster(
     { role: "user",   content: userMessage },
   ], 4000)
 
-  const raw = await callAI(config, targetUrl, payload)
+  const raw = await callFn(config, targetUrl, payload)
 
   try {
     const jsonStr = extractJson(raw)
@@ -448,6 +461,7 @@ Return the complete refined markdown document and nothing else.`
 export async function callPolish(
   draftMarkdown: string,
   config: AIConfig,
+  callFn: SynthesisCallFn = defaultCallAI,
 ): Promise<string> {
   const targetUrl = getTargetUrl(config)
   const payload   = buildPayload(config, [
@@ -455,7 +469,7 @@ export async function callPolish(
     { role: "user",   content: `Polish the following synthesis document:\n\n${draftMarkdown}` },
   ], 8000, false)
 
-  return callAI(config, targetUrl, payload)
+  return callFn(config, targetUrl, payload)
 }
 
 // ── Main orchestration ────────────────────────────────────────────────────────
@@ -463,9 +477,12 @@ export async function callPolish(
 export async function generateSynthesisDocument(
   blocks: TextBlock[],
   onProgress: (event: ProgressEvent) => void,
+  callFn?: SynthesisCallFn,
+  injectedConfig?: AIConfig,
 ): Promise<SynthesisResult> {
-  const config = loadAIConfig()
+  const config = injectedConfig ?? loadAIConfig()
   if (!config) throw new Error("No AI provider configured. Add an API key in Settings.")
+  const fn = callFn ?? defaultCallAI
 
   const enrichedBlocks = blocks.filter(b => !b.isEnriching && !b.isError)
   if (enrichedBlocks.length === 0) throw new Error("No notes to synthesise. Add some notes to the canvas first.")
@@ -507,10 +524,10 @@ export async function generateSynthesisDocument(
 
   try {
     ;[decontextualized, clusters] = await Promise.all([
-      callDecontextualize(edgeMap, config)
+      callDecontextualize(edgeMap, config, fn)
         .then(r  => { doneCall("callA", startA); return r })
         .catch(e => { errorCall("callA", String(e)); throw e }),
-      callCluster(edgeMap, config)
+      callCluster(edgeMap, config, fn)
         .then(r  => { doneCall("callB", startB); return r })
         .catch(e => { errorCall("callB", String(e)); throw e }),
     ])
@@ -525,7 +542,7 @@ export async function generateSynthesisDocument(
   try {
     sectionResults = await Promise.all(
       clusters.map((cluster, i) =>
-        callSynthesizeCluster(cluster, clusters, decontextualized, edgeMap, config)
+        callSynthesizeCluster(cluster, clusters, decontextualized, edgeMap, config, fn)
           .then(r  => { doneCall(`callC-${i}`, clusterStarts[i]); return r })
           .catch(e => { errorCall(`callC-${i}`, String(e)); throw e })
       )

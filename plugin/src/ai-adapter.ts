@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai-settings"
 import { CONTENT_TYPE_CONFIG, type ContentType } from "@/lib/content-types"
 import { detectContentType } from "@/lib/detect-content-type"
+import { type SynthesisCallFn } from "@/lib/synthesis"
 
 // ── Types re-exported from shared lib (avoiding "use client" import issues) ───
 
@@ -713,5 +714,50 @@ Return ONLY valid JSON:
     const catMatch  = raw.match(/"category"\s*:\s*"(.*?)"/)
     if (textMatch) return { text: textMatch[1], category: catMatch?.[1] ?? "thesis" }
     throw new Error("Could not parse ghost response")
+  }
+}
+
+// ── Synthesis transport (for plugin port of Synthesis Document generation) ────
+
+export function makeSynthesisCallFn(plugin: NodepadPlugin): SynthesisCallFn {
+  return async (config: AIConfig, targetUrl: string, payload: object) => {
+    // Gemini CLI: combine messages into a single prompt and spawn CLI
+    if (config.provider === "geminicli") {
+      const messages = ((payload as Record<string, unknown>).messages ?? []) as Array<{ role: string; content: string }>
+      const system   = messages.find(m => m.role === "system")?.content ?? ""
+      const user     = messages.find(m => m.role === "user")?.content ?? ""
+      const combined = [system, user].filter(Boolean).join("\n\n---\n\n")
+
+      console.log("[Nodepad/Gemini CLI] Stage 2: Generating synthesis...")
+      const result = await spawnCLI("gemini", ["--policy", "simple"], combined, 480000)
+      if (!result.success) throw new Error(`Gemini CLI synthesis failed: ${result.error}`)
+      console.log(`[Nodepad/Gemini CLI] Synthesis done (${result.content.length} chars)`)
+      return result.content
+    }
+
+    // All other providers: requestUrl directly to the provider
+    const isOllama = config.provider === "ollama"
+    const url = isOllama ? `${getBaseUrl(config)}/api/chat` : targetUrl
+
+    const response = await requestUrl({
+      url,
+      method: "POST",
+      headers: getProviderHeaders(config),
+      body: JSON.stringify(payload),
+      contentType: "application/json",
+      throw: false,
+    })
+
+    if (response.status >= 400) {
+      throw new Error(`Synthesis AI request failed (${response.status})`)
+    }
+
+    const data = response.json as Record<string, unknown>
+    const content = isOllama
+      ? (data.message as { content?: string } | undefined)?.content
+      : ((data.choices as Array<{ message?: { content?: string } }> | undefined)?.[0]?.message?.content)
+
+    if (!content) throw new Error("Empty response from AI provider")
+    return content
   }
 }

@@ -3,7 +3,7 @@ import { createRoot, type Root } from "react-dom/client"
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import type NodepadPlugin from "./main"
-import { enrichBlock, generateGhost } from "./ai-adapter"
+import { enrichBlock, generateGhost, getPluginAIConfig, makeSynthesisCallFn } from "./ai-adapter"
 
 import { TilingArea } from "@/components/tiling-area"
 import { KanbanArea } from "@/components/kanban-area"
@@ -16,6 +16,20 @@ import type { TextBlock } from "@/components/tile-card"
 import type { ContentType } from "@/lib/content-types"
 import { detectContentType } from "@/lib/detect-content-type"
 import { exportToMarkdown, copyToClipboard } from "@/lib/export"
+import {
+  generateSynthesisDocument,
+  callPolish,
+  getSourceAnchors,
+  type CallTiming,
+  type ProgressEvent,
+} from "@/lib/synthesis"
+import {
+  renderSynthesisDocument,
+  renderPolishedDocument,
+  slugifySynthesis,
+} from "@/lib/synthesis-export"
+import { SynthesisConfirmDialog } from "@/components/synthesis-confirm-dialog"
+import { SynthesisProgressPanel } from "@/components/synthesis-progress-panel"
 
 export const VIEW_TYPE = "nodepad-view"
 
@@ -105,10 +119,19 @@ export class NodepadView extends TextFileView {
   private root: Root | null = null
   readonly plugin: NodepadPlugin
   private fileData = ""
+  readonly synthesisTriggerRef: { current: (() => void) | null } = { current: null }
 
   constructor(leaf: WorkspaceLeaf, plugin: NodepadPlugin) {
     super(leaf)
     this.plugin = plugin
+  }
+
+  triggerSynthesis() {
+    if (this.synthesisTriggerRef.current) {
+      this.synthesisTriggerRef.current()
+    } else {
+      new Notice("Nodepad: open a canvas first to generate a synthesis document.")
+    }
   }
 
   getViewType() { return VIEW_TYPE }
@@ -157,6 +180,7 @@ export class NodepadView extends TextFileView {
           initialData={this.fileData}
           fileName={this.file?.basename}
           folderPath={this.file?.parent?.path}
+          synthesisTriggerRef={this.synthesisTriggerRef}
           onSave={(data) => {
             this.fileData = data
             this.requestSave()
@@ -183,9 +207,10 @@ interface NodepadAppProps {
   onSave: (data: string) => void
   onMenuClick: () => void
   portalContainer?: HTMLElement
+  synthesisTriggerRef?: { current: (() => void) | null }
 }
 
-function NodepadApp({ plugin, initialData, fileName, folderPath, onSave, onMenuClick, portalContainer }: NodepadAppProps) {
+function NodepadApp({ plugin, initialData, fileName, folderPath, onSave, onMenuClick, portalContainer, synthesisTriggerRef }: NodepadAppProps) {
   const parsed = useMemo(() => parseFileData(initialData), [initialData])
 
   const [blocks, setBlocks] = useState<TextBlock[]>(parsed.blocks)
@@ -197,6 +222,119 @@ function NodepadApp({ plugin, initialData, fileName, folderPath, onSave, onMenuC
   const [viewMode, setViewMode] = useState<"tiling" | "kanban" | "graph">(parsed.viewMode ?? "tiling")
   const [isGhostPanelOpen, setIsGhostPanelOpen] = useState(false)
   const [isIndexOpen, setIsIndexOpen] = useState(false)
+
+  // ── Synthesis state ───────────────────────────────────────────────────────
+  const [synthConfirmOpen,   setSynthConfirmOpen]   = useState(false)
+  const [synthProgressOpen,  setSynthProgressOpen]  = useState(false)
+  const [synthCalls,         setSynthCalls]         = useState<CallTiming[]>([])
+  const [synthActive,        setSynthActive]        = useState(false)
+  const [synthTotalStart,    setSynthTotalStart]    = useState<number | undefined>(undefined)
+  const [synthSourceAnchors, setSynthSourceAnchors] = useState<TextBlock[]>([])
+  const synthEnablePolish = useRef(false)
+
+  // Expose trigger to NodepadView so the command palette can open the dialog
+  useEffect(() => {
+    if (synthesisTriggerRef) {
+      synthesisTriggerRef.current = () => {
+        setSynthSourceAnchors(getSourceAnchors(blocks))
+        setSynthConfirmOpen(true)
+      }
+      return () => { synthesisTriggerRef.current = null }
+    }
+  }, [synthesisTriggerRef, blocks])
+
+  const startSynthesis = useCallback((enablePolish: boolean) => {
+    synthEnablePolish.current = enablePolish
+    setSynthConfirmOpen(false)
+    setSynthCalls([])
+    setSynthActive(true)
+    setSynthProgressOpen(false)
+
+    const generationStart = Date.now()
+    setSynthTotalStart(generationStart)
+
+    const canvasName = fileName ?? "Synthesis"
+    const slug       = slugifySynthesis(canvasName)
+    const dir        = folderPath ?? ""
+
+    const config  = getPluginAIConfig(plugin)
+    const callFn  = makeSynthesisCallFn(plugin)
+
+    const onProgress = (event: ProgressEvent) => {
+      setSynthCalls(prev => {
+        const next = [...prev]
+        if (event.type === "phase_start") {
+          next.push({
+            id: event.id, label: event.label, status: "running",
+            startTime: Date.now(),
+            isParallel: event.id.startsWith("callC-") || event.id === "callA" || event.id === "callB",
+          })
+        } else if (event.type === "phase_done") {
+          const t = next.find(t => t.id === event.id)
+          if (t) { t.status = "done"; t.durationMs = event.durationMs }
+        } else if (event.type === "error") {
+          const t = next.find(t => t.id === event.id)
+          if (t) t.status = "error"
+        }
+        return next
+      })
+    }
+
+    const writeToVault = async (filename: string, content: string) => {
+      let path = dir ? `${dir}/${filename}` : filename
+      let idx  = 2
+      while (plugin.app.vault.getAbstractFileByPath(path)) {
+        const dot = filename.lastIndexOf(".")
+        const base = dot >= 0 ? filename.slice(0, dot) : filename
+        const ext  = dot >= 0 ? filename.slice(dot) : ""
+        path = dir ? `${dir}/${base}-${idx}${ext}` : `${base}-${idx}${ext}`
+        idx++
+      }
+      const file = await plugin.app.vault.create(path, content)
+      await plugin.app.workspace.getLeaf("tab").openFile(file)
+    }
+
+    generateSynthesisDocument(blocks, onProgress, callFn, config ?? undefined)
+      .then(async ({ outline, decontextualized, clusters, timings }) => {
+        const rawMs = Date.now() - generationStart
+        const rawMd = renderSynthesisDocument(canvasName, outline, decontextualized, clusters, timings, false, rawMs)
+        await writeToVault(`${slug}-synthesis.md`, rawMd)
+
+        if (enablePolish && config) {
+          const dStart = Date.now()
+          setSynthCalls(prev => [...prev, {
+            id: "callD", label: "Final editorial polish",
+            status: "running", startTime: dStart, isParallel: false,
+          }])
+          try {
+            const draftForPolish = renderSynthesisDocument(canvasName, outline, decontextualized, clusters, [], false)
+            const polishedText   = await callPolish(draftForPolish, config, callFn)
+            const polishDuration = Date.now() - dStart
+            setSynthCalls(prev => prev.map(c =>
+              c.id === "callD" ? { ...c, status: "done", durationMs: polishDuration } : c
+            ))
+            const fullTimings: CallTiming[] = [
+              ...timings,
+              { id: "callD", label: "Final editorial polish", status: "done", durationMs: polishDuration },
+            ]
+            const polishedMs = Date.now() - generationStart
+            const polishedMd = renderPolishedDocument(polishedText, fullTimings, polishedMs)
+            await writeToVault(`${slug}-synthesis-polished.md`, polishedMd)
+          } catch (e) {
+            setSynthCalls(prev => prev.map(c =>
+              c.id === "callD" ? { ...c, status: "error" } : c
+            ))
+            console.error("[synthesis polish]", e)
+          }
+        }
+        setSynthActive(false)
+      })
+      .catch((err: Error) => {
+        console.error("[synthesis]", err)
+        new Notice(`Synthesis failed: ${err.message}`)
+        setSynthActive(false)
+      })
+  }, [blocks, fileName, folderPath, plugin])
   const [isCommandKOpen, setIsCommandKOpen] = useState(false)
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null)
   const [undoToast, setUndoToast] = useState<string | null>(null)
@@ -687,6 +825,25 @@ function NodepadApp({ plugin, initialData, fileName, folderPath, onSave, onMenuC
         onClose={() => setIsIndexOpen(false)}
         isOpen={isIndexOpen}
         viewMode={viewMode}
+      />
+
+      {/* Synthesis dialogs — portalled into the plugin container */}
+      <SynthesisConfirmDialog
+        isOpen={synthConfirmOpen}
+        sourceAnchors={synthSourceAnchors}
+        blockCount={blocks.length}
+        onConfirm={startSynthesis}
+        onCancel={() => setSynthConfirmOpen(false)}
+        container={portalContainer}
+      />
+      <SynthesisProgressPanel
+        calls={synthCalls}
+        isActive={synthActive}
+        totalStartMs={synthTotalStart}
+        isDialogOpen={synthProgressOpen}
+        onPillClick={() => setSynthProgressOpen(true)}
+        onDialogClose={() => setSynthProgressOpen(false)}
+        container={portalContainer}
       />
     </div>
   )
