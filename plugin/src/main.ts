@@ -19,6 +19,17 @@ export default class NodepadPlugin extends Plugin {
       callback: () => this.createNewSpace(),
     })
 
+    this.addCommand({
+      id: "generate-synthesis-document",
+      name: "Generate Synthesis Document",
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(NodepadView)
+        if (!view) return false
+        if (!checking) view.triggerSynthesis()
+        return true
+      },
+    })
+
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, item) => {
         if (!(item instanceof TFolder)) return

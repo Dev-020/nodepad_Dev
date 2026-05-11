@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   Trello, Grid, Trash2, Clipboard, Download,
   FolderOpen, FolderPlus, BookOpen, Sparkles,
-  FolderDown, FolderInput, GitFork
+  FolderDown, FolderInput, GitFork, ScrollText
 } from "lucide-react"
 import { Command } from "cmdk"
 import { useModKey } from "@/lib/utils"
@@ -14,8 +14,9 @@ const ALL_ACTION_ITEMS = [
   { id: "export-nodepad", icon: FolderDown,  label: "Export",  sub: ".nodepad", pluginOnly: false },
   { id: "import-nodepad", icon: FolderInput, label: "Import",  sub: ".nodepad", pluginOnly: false },
   { id: "export-md",      icon: Download,    label: "Export",  sub: "markdown", pluginOnly: true  },
-  { id: "copy-md",        icon: Clipboard,   label: "Copy",    sub: "markdown", pluginOnly: true  },
-  { id: "clear",          icon: Trash2,      label: "Clear",   sub: "canvas",   pluginOnly: true  },
+  { id: "copy-md",       icon: Clipboard,  label: "Copy",      sub: "markdown", pluginOnly: true  },
+  { id: "synthesis-doc", icon: ScrollText, label: "Synthesis", sub: "document", pluginOnly: false },
+  { id: "clear",         icon: Trash2,     label: "Clear",     sub: "canvas",   pluginOnly: true  },
 ]
 
 // ─── Props ───────────────────────────────────────────────────────────────────
