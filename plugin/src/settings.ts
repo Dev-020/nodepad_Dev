@@ -5,6 +5,7 @@ import { AI_PROVIDER_PRESETS, getModelsForProvider, type AIProvider } from "@/li
 export interface NodepadSettings {
   provider: AIProvider
   apiKey: string
+  providerKeys: Partial<Record<AIProvider, string>>
   modelId: string
   customBaseUrl: string
   useLocalOllama: boolean
@@ -13,6 +14,7 @@ export interface NodepadSettings {
 export const DEFAULT_SETTINGS: NodepadSettings = {
   provider: "openrouter",
   apiKey: "",
+  providerKeys: {},
   modelId: "openai/gpt-4o",
   customBaseUrl: "",
   useLocalOllama: true,
@@ -31,7 +33,7 @@ export class NodepadSettingTab extends PluginSettingTab {
     containerEl.empty()
     containerEl.createEl("h2", { text: "Nodepad" })
 
-    // ── Provider ─────────────────────────────────────────────────────────────
+    // ── Provider ──────────────────────────────────────────────────────────────
 
     new Setting(containerEl)
       .setName("Provider")
@@ -40,11 +42,23 @@ export class NodepadSettingTab extends PluginSettingTab {
         AI_PROVIDER_PRESETS.forEach((p) => drop.addOption(p.id, p.label))
         drop.setValue(this.plugin.settings.provider)
         drop.onChange(async (value) => {
-          this.plugin.settings.provider = value as AIProvider
-          const models = getModelsForProvider(value as AIProvider)
-          if (models.length > 0) {
-            this.plugin.settings.modelId = models[0].id
+          const newProvider = value as AIProvider
+          const previousProvider = this.plugin.settings.provider
+
+          // Save the current key under the provider we're leaving
+          this.plugin.settings.providerKeys = {
+            ...this.plugin.settings.providerKeys,
+            [previousProvider]: this.plugin.settings.apiKey,
           }
+
+          // Switch provider and restore the key we saved for the new one
+          this.plugin.settings.provider = newProvider
+          this.plugin.settings.apiKey = this.plugin.settings.providerKeys[newProvider] ?? ""
+
+          // Reset model to the first available for the new provider
+          const models = getModelsForProvider(newProvider)
+          if (models.length > 0) this.plugin.settings.modelId = models[0].id
+
           await this.plugin.saveSettings()
           this.display()
         })
@@ -59,22 +73,41 @@ export class NodepadSettingTab extends PluginSettingTab {
         ? "Leave empty when using local Ollama (no key needed for localhost)."
         : "Your API key for the selected provider."
 
+      const preset = AI_PROVIDER_PRESETS.find(p => p.id === provider)
+      let keyInputEl: HTMLInputElement
+
       new Setting(containerEl)
         .setName("API key")
         .setDesc(keyDesc)
         .addText((text) => {
           text
-            .setPlaceholder(AI_PROVIDER_PRESETS.find(p => p.id === provider)?.keyPlaceholder ?? "Enter your API key")
+            .setPlaceholder(preset?.keyPlaceholder ?? "Enter your API key")
             .setValue(this.plugin.settings.apiKey)
             .onChange(async (value) => {
               this.plugin.settings.apiKey = value
+              // Keep providerKeys in sync so switching away preserves the latest value
+              this.plugin.settings.providerKeys = {
+                ...this.plugin.settings.providerKeys,
+                [provider]: value,
+              }
               await this.plugin.saveSettings()
             })
           text.inputEl.type = "password"
           text.inputEl.style.width = "100%"
+          keyInputEl = text.inputEl
+        })
+        .addExtraButton((btn) => {
+          let visible = false
+          btn
+            .setIcon("eye")
+            .setTooltip("Show / hide API key")
+            .onClick(() => {
+              visible = !visible
+              keyInputEl.type = visible ? "text" : "password"
+              btn.setIcon(visible ? "eye-off" : "eye")
+            })
         })
     } else {
-      // Gemini CLI — show binary detection status
       new Setting(containerEl)
         .setName("Gemini CLI status")
         .setDesc("Gemini CLI uses local Google account authentication — no API key needed.")
@@ -88,12 +121,8 @@ export class NodepadSettingTab extends PluginSettingTab {
                   let out = ""
                   child.stdout.on("data", (d: Buffer) => { out += d.toString() })
                   child.on("close", (code: number) => {
-                    if (code === 0) {
-                      new Notice(`Gemini CLI detected: ${out.trim()}`)
-                      resolve()
-                    } else {
-                      reject(new Error("not found"))
-                    }
+                    if (code === 0) { new Notice(`Gemini CLI detected: ${out.trim()}`); resolve() }
+                    else reject(new Error("not found"))
                   })
                   child.on("error", reject)
                 })
@@ -120,7 +149,6 @@ export class NodepadSettingTab extends PluginSettingTab {
             })
         })
 
-      // Model discovery for local Ollama
       if (this.plugin.settings.useLocalOllama) {
         new Setting(containerEl)
           .setName("Local Ollama models")
@@ -158,7 +186,6 @@ export class NodepadSettingTab extends PluginSettingTab {
             })
           })
       } else {
-        // Ollama cloud or custom provider — free-text model ID
         new Setting(containerEl)
           .setName("Model ID")
           .setDesc("e.g. llama3.2, hf.co/org/model for Ollama Cloud.")
