@@ -42,6 +42,16 @@ export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpe
   const searchInputRef = React.useRef<HTMLInputElement>(null)
   const itemRefs = React.useRef<(HTMLButtonElement | null)[]>([])
 
+  // Context-aware undo: text undo when the input has content, block undo otherwise
+  const handleUndo = React.useCallback(() => {
+    if (value && mainInputRef.current) {
+      mainInputRef.current.focus()
+      document.execCommand("undo")
+    } else {
+      onUndo?.()
+    }
+  }, [value, onUndo])
+
   // ── Items (mod-key aware) ───────────────────────────────────────────────
 
   const VIEW_ITEMS = React.useMemo(() => [
@@ -368,7 +378,7 @@ export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpe
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={onUndo}
+              onClick={handleUndo}
               className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-white/[0.06] active:scale-95 transition-all"
             >
               <kbd className="flex h-5 items-center rounded border border-white/10 bg-white/5 px-1.5 font-mono text-[9px] text-white/60">
