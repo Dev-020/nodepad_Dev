@@ -162,14 +162,25 @@ function dumpRawResponse(label: string, raw: string): void {
 }
 
 function extractJson(text: string): string {
+  // Fenced code block takes priority
   const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/)
   if (fenced) return fenced[1].trim()
-  const arrStart = text.indexOf("[")
-  const arrEnd   = text.lastIndexOf("]")
-  if (arrStart !== -1 && arrEnd > arrStart) return text.slice(arrStart, arrEnd + 1)
+
   const objStart = text.indexOf("{")
-  const objEnd   = text.lastIndexOf("}")
-  if (objStart !== -1 && objEnd > objStart) return text.slice(objStart, objEnd + 1)
+  const arrStart = text.indexOf("[")
+
+  // Use whichever opening delimiter appears first in the text.
+  // This correctly handles:
+  //   - Object responses that contain arrays (synthesis): { comes before any [
+  //   - Array responses (decontextualize, cluster): [ comes before any {
+  if (objStart !== -1 && (arrStart === -1 || objStart <= arrStart)) {
+    const objEnd = text.lastIndexOf("}")
+    if (objEnd > objStart) return text.slice(objStart, objEnd + 1)
+  }
+  if (arrStart !== -1) {
+    const arrEnd = text.lastIndexOf("]")
+    if (arrEnd > arrStart) return text.slice(arrStart, arrEnd + 1)
+  }
   return text.trim()
 }
 
