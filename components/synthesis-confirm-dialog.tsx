@@ -119,11 +119,11 @@ export function SynthesisConfirmDialog({
                       ? <CheckSquare className="h-4 w-4 text-primary shrink-0" />
                       : <Square className="h-4 w-4 text-white/30 group-hover:text-white/50 shrink-0" />
                     }
-                    <div>
+                    <div className="min-w-0">
                       <p className="font-mono text-[11px] text-white/80">
                         Enable AI Final Polish (Call D)
                       </p>
-                      <p className="font-mono text-[9px] text-white/35 mt-0.5">
+                      <p className="font-mono text-[9px] text-white/35 mt-0.5 break-words">
                         One additional sequential AI call that refines cross-section flow.
                         Produces a second polished file alongside the raw output.
                       </p>
