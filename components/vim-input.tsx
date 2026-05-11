@@ -15,7 +15,7 @@ const ALL_ACTION_ITEMS = [
   { id: "import-nodepad", icon: FolderInput, label: "Import",  sub: ".nodepad", pluginOnly: false },
   { id: "export-md",      icon: Download,    label: "Export",  sub: "markdown", pluginOnly: true  },
   { id: "copy-md",       icon: Clipboard,  label: "Copy",      sub: "markdown", pluginOnly: true  },
-  { id: "synthesis-doc", icon: ScrollText, label: "Synthesis", sub: "document", pluginOnly: false },
+  { id: "synthesis-doc", icon: ScrollText, label: "Synthesis", sub: "document", pluginOnly: true  },
   { id: "clear",         icon: Trash2,     label: "Clear",     sub: "canvas",   pluginOnly: true  },
 ]
 
