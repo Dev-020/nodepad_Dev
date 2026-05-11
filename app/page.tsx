@@ -927,8 +927,10 @@ export default function Page() {
     setSynthConfirmOpen(false)
     setSynthCalls([])
     setSynthActive(true)
-    setSynthTotalStart(Date.now())
     setSynthProgressOpen(false)
+
+    const generationStart = Date.now()   // local — used for accurate wall-clock timing
+    setSynthTotalStart(generationStart)  // state — used for the progress pill display
 
     const blocks = proj.blocks
     const name   = proj.name
@@ -956,12 +958,12 @@ export default function Page() {
 
     generateSynthesisDocument(blocks, onProgress)
       .then(async ({ outline, decontextualized, clusters, timings }) => {
-        // Render raw (with timing footer)
-        const rawMd = renderSynthesisDocument(name, outline, decontextualized, clusters, timings, false)
+        // Wall-clock time for the raw file = time from start to Call C completion
+        const rawWallClockMs = Date.now() - generationStart
+        const rawMd = renderSynthesisDocument(name, outline, decontextualized, clusters, timings, false, rawWallClockMs)
         downloadMarkdown(`${slug}-synthesis.md`, rawMd)
 
         if (enablePolish) {
-          // Register Call D in progress
           const dStart = Date.now()
           setSynthCalls(prev => [...prev, {
             id: "callD", label: "Final editorial polish",
@@ -972,7 +974,6 @@ export default function Page() {
             const config = loadAIConfig()
             if (!config) throw new Error("No AI config for polish")
 
-            // Draft without timing footer for cleaner polish input
             const draftForPolish = renderSynthesisDocument(name, outline, decontextualized, clusters, [], false)
             const polishedText   = await callPolish(draftForPolish, config)
             const polishDuration = Date.now() - dStart
@@ -981,12 +982,13 @@ export default function Page() {
               c.id === "callD" ? { ...c, status: "done", durationMs: polishDuration } : c
             ))
 
-            // Add Call D to timings for footer
             const fullTimings: CallTiming[] = [
               ...timings,
               { id: "callD", label: "Final editorial polish", status: "done", durationMs: polishDuration },
             ]
-            const polishedMd = renderPolishedDocument(polishedText, fullTimings)
+            // Wall-clock for polished = full elapsed including Call D
+            const polishedWallClockMs = Date.now() - generationStart
+            const polishedMd = renderPolishedDocument(polishedText, fullTimings, polishedWallClockMs)
             downloadMarkdown(`${slug}-synthesis-polished.md`, polishedMd)
           } catch (e) {
             setSynthCalls(prev => prev.map(c =>
