@@ -71,7 +71,8 @@ export function TilingMinimap({ pages, activePageIdx, onPageClick }: TilingMinim
               onClick={() => onPageClick(idx)}
               onMouseEnter={() => setHoveredIdx(idx)}
               onMouseLeave={() => setHoveredIdx(null)}
-              className={`group relative flex flex-col items-center gap-[4px] p-1.5 rounded-md transition-all duration-150 outline-none ${
+              style={{ paddingTop: "1.5rem", paddingBottom: "1.5rem", paddingLeft: "0.375rem", paddingRight: "0.375rem" }}
+              className={`group relative flex flex-col items-center gap-[4px] rounded-md transition-all duration-150 outline-none ${
                 isActive
                   ? "bg-primary/15 border border-primary/40 shadow-[0_0_0_1px_var(--primary)]"
                   : "border border-white/10 bg-white/[0.04] hover:bg-white/[0.09] hover:border-white/25"
