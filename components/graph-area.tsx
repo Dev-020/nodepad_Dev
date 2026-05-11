@@ -439,6 +439,16 @@ export function GraphArea({
           onMouseLeave={handleSvgMouseUp}
           onClick={() => { if (!didPan.current) setSelectedId(null) }}
         >
+          {/* Full-area transparent rect — ensures wheel/pan events fire on empty canvas,
+              not just over painted nodes. Needed because Obsidian forces SVG display:inline-block
+              which limits hit-testing to painted regions only. */}
+          <rect
+            width={dims.w}
+            height={dims.h}
+            fill="transparent"
+            style={{ pointerEvents: "all" }}
+          />
+
           <defs>
             <filter id="glow-synth" x="-60%" y="-60%" width="220%" height="220%">
               <feGaussianBlur stdDeviation="7" result="blur" />
