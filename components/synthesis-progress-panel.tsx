@@ -20,7 +20,7 @@ interface SynthesisProgressPanelProps {
 // ── Elapsed timer for running calls ──────────────────────────────────────────
 
 function useElapsed(active: boolean): number {
-  const [now, setNow] = React.useState(Date.now())
+  const [now, setNow] = React.useState(0)
   React.useEffect(() => {
     if (!active) return
     const id = setInterval(() => setNow(Date.now()), 1000)
