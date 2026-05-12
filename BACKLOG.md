@@ -22,10 +22,10 @@
 - **Proposed Fix**: Use a fast model to distill the note text into 1-3 crisp search queries before calling `/api/web_search`.
 
 ### [#004] Hydration Mismatch Suppression
-- **Status**: `Open` | **Priority**: `P3` | **Labels**: `UI`, `Tech-Debt`
+- **Status**: `Closed` | **Resolved**: 2026-05-12 | **Priority**: `P3` | **Labels**: `UI`, `Tech-Debt`
 - **Created**: 2026-04-10
-- **Description**: Browser extensions injecting attributes (like `fdprocessedid`) cause React hydration warnings in the console.
-- **Proposed Fix**: Add `suppressHydrationWarning` to the main input component.
+- **Summary**: Fixed. Root cause was `useModKey()` in `lib/utils.ts` initializing as `'⌘'` on the server but correcting to `'Ctrl'` on non-Mac clients after mount — React flagged this on every page load on Windows. The `fdprocessedid` attributes from browser extensions were a red herring; React reported them as the mismatch location but they were not the cause. Also fixed `useElapsed()` in `synthesis-progress-panel.tsx` which initialized state with `Date.now()`, always producing different values on server vs client.
+- **Fix**: Added `suppressHydrationWarning` to the keyboard hint elements in `vim-input.tsx`, `tiling-area.tsx`, `kanban-area.tsx`, and `graph-area.tsx`. Changed `useElapsed` initial state from `Date.now()` to `0`.
 
 ### [#012] Multi-modal Support (Visual Anchors & Reasoning)
 - **Status**: `Open` | **Priority**: `P1` | **Labels**: `Feature`, `Multi-modal`
@@ -185,6 +185,11 @@
     - Keyless auth detection in settings UI; graceful error if `gemini` binary not on PATH
     - JSON stats parsing for Ollama-style terminal logs (tool usage, model selection)
 
+### [#030] confidenceBar RangeError on Markdown Export
+- **Status**: `Closed` | **Resolved**: 2026-05-12 | **Labels**: `Bug`, `Stability`
+- **Summary**: `confidenceBar()` in `lib/export.ts` treated confidence as a `[0, 1]` decimal, but the codebase stores it as an integer percentage `[0–100]`. Exporting any project with an AI-enriched claim block crashed with `RangeError: Invalid count value` on `String.repeat()`. Only reproducible with larger workspaces because the confidence bar is only rendered for `claim`-typed blocks, which are more likely to be AI-enriched in bigger projects.
+- **Fix**: Corrected `confidenceBar` to use `Math.round(c)` for the percentage and `Math.round(c / 20)` for the filled segment count.
+
 ### [#016] TypeError in TileCard (icon of undefined)
 - **Status**: `Closed` | **Resolved**: 2026-05-03
 - **Labels**: `Bug`, `Stability`, `UI`
@@ -195,7 +200,7 @@
 ## 🔭 Upcoming Features
 
 ### [#027] Synthesis Document Generation
-- **Status**: `Closed (web-app)` · `Open (plugin port)` | **Priority**: `P2` | **Labels**: `Feature`, `AI`
+- **Status**: `Closed` | **Resolved**: 2026-05-12 | **Priority**: `P2` | **Labels**: `Feature`, `AI`
 - **Created**: 2026-05-11 | **Web-app resolved**: 2026-05-11
 - **Design spec**: [`docs/synthesis-document-plan.md`](docs/synthesis-document-plan.md)
 - **Description**: On-demand command ("Generate Synthesis Document") that consolidates enriched nodes from a `.nodepad` canvas into a structured, contextualized Obsidian markdown document. Unlike the raw markdown export which dumps nodes grouped by type, this pipeline expands sparse notes into self-contained statements, clusters them into coherent thematic sections by meaning, and adds expounding prompts that push thinking into adjacent territory the notes don't cover. Acts as the bridge from nodepad's raw idea staging area into Obsidian's permanent knowledge graph.
