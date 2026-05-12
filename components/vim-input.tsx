@@ -228,7 +228,7 @@ export function VimInput({ onSubmit, onCommand, isCommandKOpen, setIsCommandKOpe
             >
               {/* Search input */}
               <div className="flex items-center gap-3 px-5 py-3 border-b border-white/10">
-                <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-white/60 select-none shrink-0">{mod}K</span>
+                <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-white/60 select-none shrink-0" suppressHydrationWarning>{mod}K</span>
                 <input
                   ref={searchInputRef}
                   value={search}
