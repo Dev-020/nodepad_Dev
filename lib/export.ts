@@ -63,10 +63,10 @@ function formatTime(ts?: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 }
 
-/** Five-block filled/empty bar + percentage */
+/** Five-block filled/empty bar + percentage. c is 0–100 integer. */
 function confidenceBar(c: number): string {
-  const pct    = Math.round(c * 100)
-  const filled = Math.round(c * 5)
+  const pct    = Math.round(c)
+  const filled = Math.round(c / 20)   // c/100 * 5
   const bar    = "█".repeat(filled) + "░".repeat(5 - filled)
   return `${bar} ${pct}%`
 }
